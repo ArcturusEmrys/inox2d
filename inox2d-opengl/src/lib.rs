@@ -116,6 +116,7 @@ pub struct OpenglRenderer {
 	vao: glow::VertexArray,
 	deform_buffer: glow::Buffer,
 
+	surface_framebuffer: Option<glow::Framebuffer>,
 	composite_framebuffer: glow::Framebuffer,
 	cf_albedo: glow::Texture,
 	cf_emissive: glow::Texture,
@@ -136,6 +137,19 @@ impl OpenglRenderer {
 	/// - Decode textures.
 	/// - Upload static buffer data and textures.
 	pub fn new(gl: glow::Context, model: &Model) -> Result<Self, OpenglRendererError> {
+		Self::new_with_framebuffer(gl, model, None)
+	}
+
+	/// Create an OpenGL renderer that renders to a particular framebuffer.
+	///
+	/// The framebuffer is treated as an externally-managed object and no
+	/// attempt is made to initialize it. Passing `None` will render to the
+	/// context's ordinary surface.
+	pub fn new_with_framebuffer(
+		gl: glow::Context,
+		model: &Model,
+		surface_framebuffer: Option<glow::Framebuffer>,
+	) -> Result<Self, OpenglRendererError> {
 		unsafe {
 			// Initialize framebuffers
 			let cf_albedo = gl.create_texture().map_err(OpenglRendererError::Opengl)?;
@@ -200,6 +214,7 @@ impl OpenglRenderer {
 				vao,
 				deform_buffer,
 
+				surface_framebuffer,
 				composite_framebuffer,
 				cf_albedo,
 				cf_emissive,
@@ -368,7 +383,7 @@ impl OpenglRenderer {
 			0,
 		);
 
-		gl.bind_framebuffer(glow::FRAMEBUFFER, None);
+		gl.bind_framebuffer(glow::FRAMEBUFFER, self.surface_framebuffer);
 	}
 
 	pub fn resize(&mut self, w: u32, h: u32) {
@@ -625,7 +640,7 @@ impl<'a> DrawSession<'a> for OpenGlSession<'a> {
 
 		self.render.clear_texture_cache();
 		unsafe {
-			gl.bind_framebuffer(glow::FRAMEBUFFER, None);
+			gl.bind_framebuffer(glow::FRAMEBUFFER, self.render.surface_framebuffer);
 		}
 
 		let blending = &components.drawable.blending;
