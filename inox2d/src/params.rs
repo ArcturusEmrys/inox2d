@@ -8,7 +8,7 @@ use crate::math::{
 	matrix::Matrix2d,
 };
 use crate::node::{
-	components::{DeformSource, DeformStack, Mesh, TransformStore, ZSort},
+	components::{DeformSource, DeformStack, Drawable, Mesh, TransformStore, ZSort},
 	InoxNodeUuid,
 };
 use crate::puppet::{InoxNodeTree, Puppet, World};
@@ -32,8 +32,13 @@ pub enum BindingValues {
 	TransformRY(Matrix2d<f32>),
 	TransformRZ(Matrix2d<f32>),
 	Deform(Matrix2d<Vec<Vec2>>),
-	// TODO
-	Opacity,
+	TintR(Matrix2d<f32>),
+	TintG(Matrix2d<f32>),
+	TintB(Matrix2d<f32>),
+	ScreenTintR(Matrix2d<f32>),
+	ScreenTintG(Matrix2d<f32>),
+	ScreenTintB(Matrix2d<f32>),
+	Opacity(Matrix2d<f32>),
 }
 
 #[derive(Debug, Clone)]
@@ -231,8 +236,48 @@ impl Param {
 						.expect("Nodes being deformed must have a DeformStack component.")
 						.push(DeformSource::Param(self.uuid), Deform::Direct(direct_deform));
 				}
-				// TODO
-				BindingValues::Opacity => {}
+				BindingValues::TintR(ref matrix) => {
+					let (out_top, out_bottom) = ranges_out(matrix, x_mindex, x_maxdex, y_mindex, y_maxdex);
+
+					comps.get_mut::<Drawable>(binding.node).unwrap().blending.tint.x +=
+						bi_interpolate_f32(val_normed, range_in, out_top, out_bottom, binding.interpolate_mode);
+				}
+				BindingValues::TintG(ref matrix) => {
+					let (out_top, out_bottom) = ranges_out(matrix, x_mindex, x_maxdex, y_mindex, y_maxdex);
+
+					comps.get_mut::<Drawable>(binding.node).unwrap().blending.tint.y +=
+						bi_interpolate_f32(val_normed, range_in, out_top, out_bottom, binding.interpolate_mode);
+				}
+				BindingValues::TintB(ref matrix) => {
+					let (out_top, out_bottom) = ranges_out(matrix, x_mindex, x_maxdex, y_mindex, y_maxdex);
+
+					comps.get_mut::<Drawable>(binding.node).unwrap().blending.tint.z +=
+						bi_interpolate_f32(val_normed, range_in, out_top, out_bottom, binding.interpolate_mode);
+				}
+				BindingValues::ScreenTintR(ref matrix) => {
+					let (out_top, out_bottom) = ranges_out(matrix, x_mindex, x_maxdex, y_mindex, y_maxdex);
+
+					comps.get_mut::<Drawable>(binding.node).unwrap().blending.screen_tint.x +=
+						bi_interpolate_f32(val_normed, range_in, out_top, out_bottom, binding.interpolate_mode);
+				}
+				BindingValues::ScreenTintG(ref matrix) => {
+					let (out_top, out_bottom) = ranges_out(matrix, x_mindex, x_maxdex, y_mindex, y_maxdex);
+
+					comps.get_mut::<Drawable>(binding.node).unwrap().blending.screen_tint.y +=
+						bi_interpolate_f32(val_normed, range_in, out_top, out_bottom, binding.interpolate_mode);
+				}
+				BindingValues::ScreenTintB(ref matrix) => {
+					let (out_top, out_bottom) = ranges_out(matrix, x_mindex, x_maxdex, y_mindex, y_maxdex);
+
+					comps.get_mut::<Drawable>(binding.node).unwrap().blending.screen_tint.z +=
+						bi_interpolate_f32(val_normed, range_in, out_top, out_bottom, binding.interpolate_mode);
+				}
+				BindingValues::Opacity(ref matrix) => {
+					let (out_top, out_bottom) = ranges_out(matrix, x_mindex, x_maxdex, y_mindex, y_maxdex);
+
+					comps.get_mut::<Drawable>(binding.node).unwrap().blending.opacity +=
+						bi_interpolate_f32(val_normed, range_in, out_top, out_bottom, binding.interpolate_mode);
+				}
 			}
 		}
 	}
