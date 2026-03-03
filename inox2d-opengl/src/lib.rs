@@ -238,7 +238,7 @@ impl OpenglRenderer {
 	}
 
 	pub fn context(&self) -> &glow::Context {
-		&self.gl;
+		&self.gl
 	}
 
 	pub fn set_surface_framebuffer(&mut self, surface_framebuffer: Option<glow::Framebuffer>) {
