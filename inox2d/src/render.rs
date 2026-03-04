@@ -6,7 +6,7 @@ use std::error::Error;
 use std::mem::swap;
 
 use crate::node::{
-	components::{DeformStack, Mask, Masks, ZSort},
+	components::{DeformStack, Mask, Masks, Mesh, MeshGroup, ZSort},
 	drawables::{CompositeComponents, DrawableKind, TexturedMeshComponents},
 	InoxNodeUuid,
 };
@@ -111,6 +111,18 @@ impl RenderCtx {
 						);
 					}
 				};
+
+				// MeshGroup isn't drawable, but we still need to make sure it
+				// gets a deform stack
+				if comps.get::<MeshGroup>(node.uuid).is_some() {
+					if let Some(mesh) = comps.get::<Mesh>(node.uuid) {
+						// This is not actually drawable, but we need to give
+						// it the same components...
+						let vert_count = mesh.vertices.len();
+
+						comps.add(node.uuid, DeformStack::new(vert_count));
+					}
+				}
 			}
 		}
 
@@ -195,6 +207,9 @@ impl RenderCtx {
 						}
 					}
 				}
+
+				//TODO: Meshgroups aren't drawable, but we still need to
+				//deform them, and apply their deforms to child nodes?
 			}
 		}
 
