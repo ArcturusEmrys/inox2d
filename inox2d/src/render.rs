@@ -6,7 +6,7 @@ use std::error::Error;
 use std::mem::swap;
 
 use crate::node::{
-	components::{DeformStack, Mask, Masks, Mesh, MeshGroup, ZSort},
+	components::{DeformStack, Drawable, Mask, Masks, Mesh, MeshGroup, ZSort},
 	drawables::{CompositeComponents, DrawableKind, TexturedMeshComponents},
 	InoxNodeUuid,
 };
@@ -141,6 +141,10 @@ impl RenderCtx {
 		for node in nodes.iter() {
 			if let Some(deform_stack) = comps.get_mut::<DeformStack>(node.uuid) {
 				deform_stack.reset();
+			}
+
+			if let Some(drawable) = comps.get_mut::<Drawable>(node.uuid) {
+				drawable.reset();
 			}
 		}
 	}
