@@ -329,6 +329,12 @@ impl<'a, T: DrawSession<'a>> DrawSessionExt for T {
 			DrawableKind::Composite(ref components) => &components.drawable.masks,
 		};
 
+		let is_enabled = puppet.nodes.get_node(id).unwrap().enabled;
+		if !is_enabled && !as_mask {
+			// Disabled nodes don't render, but they can still be used as masks.
+			return;
+		}
+
 		let mut has_masks = false;
 		if let Some(ref masks) = masks {
 			has_masks = true;
