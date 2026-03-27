@@ -333,7 +333,7 @@ impl OpenglRenderer {
 	}
 
 	fn bind_shader<S: Deref<Target = glow::Program>>(&self, shader: &S) {
-		let program = **shader;
+		let program: glow::NativeProgram = **shader;
 		if !self.cache.borrow_mut().update_program(program) {
 			return;
 		}
@@ -541,6 +541,16 @@ impl<'a> DrawSession<'a> for OpenGlSession<'a> {
 		render_ctx: &TexturedMeshRenderCtx,
 		_id: InoxNodeUuid,
 	) {
+		// NOTE: This is safe for all currently implemented blendmodes.
+		// Inochi Creator has a "DestinationIn" mode that is visible at
+		// opacity 0. If that is ever implemented, we have to check for it
+		// here.
+		if !as_mask && components.drawable.blending.opacity == 0.0 {
+			self.render.push_debug_group("inox2d - draw textured content (skipped as invisible)");
+			self.render.pop_debug_group();
+			return;
+		}
+
 		self.render.push_debug_group("inox2d - draw textured content");
 
 		let gl = &self.render.gl;
