@@ -1,6 +1,7 @@
 use glam::Vec2;
 use simd_aligned::arch::f32x8;
 use simd_aligned::VecSimd;
+use std::ops::{Add, Div, Mul, Sub};
 
 use crate::math::types::Vec2x4;
 
@@ -45,7 +46,7 @@ impl InterpRange<Vec2> {
 }
 
 #[inline]
-fn interpolate_nearest(t: f32, range_in: InterpRange<f32>, range_out: InterpRange<f32>) -> f32 {
+fn interpolate_nearest<O>(t: f32, range_in: InterpRange<f32>, range_out: InterpRange<O>) -> O {
 	debug_assert!(
 		range_in.beg <= t && t <= range_in.end,
 		"{} <= {} <= {}",
@@ -62,7 +63,11 @@ fn interpolate_nearest(t: f32, range_in: InterpRange<f32>, range_out: InterpRang
 }
 
 #[inline]
-fn interpolate_linear(t: f32, range_in: InterpRange<f32>, range_out: InterpRange<f32>) -> f32 {
+fn interpolate_linear<O>(t: f32, range_in: InterpRange<f32>, range_out: InterpRange<O>) -> O
+where
+	O: Copy + Add<Output = O> + Sub<Output = O> + Div<f32, Output = O>,
+	f32: Mul<O, Output = O>,
+{
 	debug_assert!(
 		range_in.beg <= t && t <= range_in.end,
 		"{} is out of input range [{}, {}]",
@@ -75,7 +80,11 @@ fn interpolate_linear(t: f32, range_in: InterpRange<f32>, range_out: InterpRange
 }
 
 #[inline]
-pub fn interpolate_f32(t: f32, range_in: InterpRange<f32>, range_out: InterpRange<f32>, mode: InterpolateMode) -> f32 {
+pub fn interpolate<O>(t: f32, range_in: InterpRange<f32>, range_out: InterpRange<O>, mode: InterpolateMode) -> O
+where
+	O: Copy + Add<Output = O> + Sub<Output = O> + Div<f32, Output = O>,
+	f32: Mul<O, Output = O>,
+{
 	match mode {
 		InterpolateMode::Nearest => interpolate_nearest(t, range_in, range_out),
 		InterpolateMode::Linear => interpolate_linear(t, range_in, range_out),
@@ -89,8 +98,8 @@ pub fn interpolate_vec2(
 	range_out: InterpRange<Vec2>,
 	mode: InterpolateMode,
 ) -> Vec2 {
-	let x = interpolate_f32(t, range_in, range_out.to_x(), mode);
-	let y = interpolate_f32(t, range_in, range_out.to_y(), mode);
+	let x = interpolate(t, range_in, range_out.to_x(), mode);
+	let y = interpolate(t, range_in, range_out.to_y(), mode);
 	Vec2 { x, y }
 }
 
@@ -101,14 +110,12 @@ pub fn interpolate_f32s_additive(
 	mode: InterpolateMode,
 	out: &mut VecSimd<f32x8>,
 ) {
-	for ((&ob, &oe), o) in range_out
-		.beg
-		.flat()
+	for ((&ob, &oe), o) in (&*range_out.beg)
 		.iter()
-		.zip(range_out.end.flat())
-		.zip(out.flat_mut())
+		.zip((&*range_out.end).iter())
+		.zip((&mut *out).iter_mut())
 	{
-		*o += interpolate_f32(t, range_in, InterpRange::new(ob, oe), mode);
+		*o += interpolate(t, range_in, InterpRange::new(ob, oe), mode);
 	}
 }
 
@@ -119,14 +126,12 @@ pub fn interpolate_vec2s_additive(
 	mode: InterpolateMode,
 	out: &mut VecSimd<Vec2x4>,
 ) {
-	for ((&ob, &oe), o) in range_out
-		.beg
-		.flat()
+	for ((&ob, &oe), o) in (&*range_out.beg)
 		.iter()
-		.zip(range_out.end.flat())
-		.zip(out.flat_mut())
+		.zip((&*range_out.end).iter())
+		.zip((&mut *out).iter_mut())
 	{
-		*o += interpolate_vec2(t, range_in, InterpRange::new(ob, oe), mode);
+		*o += interpolate(t, range_in, InterpRange::new(ob, oe), mode);
 	}
 }
 
@@ -138,9 +143,9 @@ pub fn bi_interpolate_f32(
 	out_bottom: InterpRange<f32>,
 	mode: InterpolateMode,
 ) -> f32 {
-	let beg = interpolate_f32(t.x, range_in.to_x(), out_top, mode);
-	let end = interpolate_f32(t.x, range_in.to_x(), out_bottom, mode);
-	interpolate_f32(t.y, range_in.to_y(), InterpRange::new(beg, end), mode)
+	let beg = interpolate(t.x, range_in.to_x(), out_top, mode);
+	let end = interpolate(t.x, range_in.to_x(), out_bottom, mode);
+	interpolate(t.y, range_in.to_y(), InterpRange::new(beg, end), mode)
 }
 
 #[inline]
@@ -154,6 +159,19 @@ pub fn bi_interpolate_vec2(
 	let beg = interpolate_vec2(t.x, range_in.to_x(), out_top, mode);
 	let end = interpolate_vec2(t.x, range_in.to_x(), out_bottom, mode);
 	interpolate_vec2(t.y, range_in.to_y(), InterpRange::new(beg, end), mode)
+}
+
+#[inline]
+pub fn bi_interpolate_vec2x4(
+	t: Vec2,
+	range_in: InterpRange<Vec2>,
+	out_top: InterpRange<Vec2x4>,
+	out_bottom: InterpRange<Vec2x4>,
+	mode: InterpolateMode,
+) -> Vec2x4 {
+	let beg = interpolate(t.x, range_in.to_x(), out_top, mode);
+	let end = interpolate(t.x, range_in.to_x(), out_bottom, mode);
+	interpolate(t.y, range_in.to_y(), InterpRange::new(beg, end), mode)
 }
 
 pub fn bi_interpolate_f32s_additive(
@@ -193,11 +211,11 @@ pub fn bi_interpolate_vec2s_additive(
 		return unsafe { x86_64_avx2::bi_interpolate_vec2s_additive_avx2(t, range_in, out_top, out_bottom, mode, out) };
 	}
 
-	for (((&otb, &ote), (&obb, &obe)), o) in (out_top.beg.flat().iter().zip(out_top.end.flat()))
-		.zip(out_bottom.beg.flat().iter().zip(out_bottom.end.flat()))
-		.zip(out.flat_mut())
+	for (((&otb, &ote), (&obb, &obe)), o) in (out_top.beg.iter().zip(out_top.end.iter()))
+		.zip(out_bottom.beg.iter().zip(out_bottom.end.iter()))
+		.zip(out.iter_mut())
 	{
-		*o += bi_interpolate_vec2(
+		*o += bi_interpolate_vec2x4(
 			t,
 			range_in,
 			InterpRange::new(otb, ote),
