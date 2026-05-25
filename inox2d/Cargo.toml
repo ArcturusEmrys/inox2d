@@ -27,6 +27,7 @@ simd_aligned = "0.6.1"
 clap = { version = "4.1.8", features = ["derive"] }
 criterion = { version = "0.8", features = ["html_reports"] }
 rand = { version = "0.10", features = ["thread_rng"] }
+assert_float_eq = "1.2.0"
 
 [features]
 owo = ["dep:owo-colors"]

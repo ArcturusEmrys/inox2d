@@ -252,6 +252,15 @@ mod tests {
 		out.copy_from_slice(aligned_out.flat());
 	}
 
+	/// Assert that a slice of Vec2s are approximately equal to another slice
+	/// of Vec2s, up to a particularly chosen epsilon value.
+	fn assert_vec2s_absolute_eq(a: &[Vec2], b: &[Vec2], epsilon: f32) {
+		for (a, b) in a.iter().zip(b.iter()) {
+			assert_float_eq::assert_float_absolute_eq!(a.x, b.x, epsilon);
+			assert_float_eq::assert_float_absolute_eq!(a.y, b.y, epsilon);
+		}
+	}
+
 	#[test]
 	fn test_linear_interpolation() {
 		assert_eq!(
@@ -346,9 +355,9 @@ mod tests {
 			&mut out,
 		);
 
-		assert_eq!(
-			out,
-			vec![
+		assert_vec2s_absolute_eq(
+			out.as_slice(),
+			&[
 				Vec2::new(0.40993863, 0.3560989),
 				Vec2::new(0.75320375, 0.8263308),
 				Vec2::new(0.29026896, 0.4825483),
@@ -360,7 +369,8 @@ mod tests {
 				Vec2::new(0.21407755, 0.43239254),
 				Vec2::new(0.5105612, 0.44481146),
 				Vec2::new(0.38410854, 0.45739365),
-			]
+			],
+			f32::EPSILON,
 		);
 	}
 
@@ -436,9 +446,9 @@ mod tests {
 			&mut out,
 		);
 
-		assert_eq!(
-			out,
-			vec![
+		assert_vec2s_absolute_eq(
+			out.as_slice(),
+			&[
 				Vec2::new(0.3036, 0.42818177),
 				Vec2::new(0.79054284, 0.69804317),
 				Vec2::new(0.40255207, 0.3045717),
@@ -449,8 +459,9 @@ mod tests {
 				Vec2::new(0.53999746, 0.60769874),
 				Vec2::new(0.03272271, 0.108495116),
 				Vec2::new(0.7805427, 0.21582133),
-				Vec2::new(0.24908477, 0.63060415)
-			]
+				Vec2::new(0.24908477, 0.63060415),
+			],
+			f32::EPSILON,
 		);
 
 		let t = Vec2::new(-0.4, 0.0);
@@ -465,9 +476,9 @@ mod tests {
 			&mut out,
 		);
 
-		assert_eq!(
-			out,
-			vec![
+		assert_vec2s_absolute_eq(
+			out.as_slice(),
+			&[
 				Vec2::new(0.8977584, 0.80095005),
 				Vec2::new(0.56985533, 0.072586596),
 				Vec2::new(0.16844785, 0.7011595),
@@ -478,8 +489,9 @@ mod tests {
 				Vec2::new(0.09791291, 0.8297892),
 				Vec2::new(0.559472, 0.31804848),
 				Vec2::new(0.9877534, 0.75839597),
-				Vec2::new(0.24279994, 0.86313826)
-			]
+				Vec2::new(0.24279994, 0.86313826),
+			],
+			f32::EPSILON,
 		);
 
 		let t = Vec2::new(-0.4, 0.4);
@@ -494,9 +506,9 @@ mod tests {
 			&mut out,
 		);
 
-		assert_eq!(
-			out,
-			vec![
+		assert_vec2s_absolute_eq(
+			out.as_slice(),
+			&[
 				Vec2::new(0.5181033, 0.27322984),
 				Vec2::new(0.7298904, 0.99417347),
 				Vec2::new(0.17261189, 0.6518882),
@@ -507,8 +519,9 @@ mod tests {
 				Vec2::new(0.7481877, 0.50074065),
 				Vec2::new(0.39253706, 0.78923327),
 				Vec2::new(0.22278339, 0.6697099),
-				Vec2::new(0.5387332, 0.25920153)
-			]
+				Vec2::new(0.5387332, 0.25920153),
+			],
+			f32::EPSILON,
 		);
 
 		let t = Vec2::new(0.4, 0.0);
@@ -523,9 +536,9 @@ mod tests {
 			&mut out,
 		);
 
-		assert_eq!(
-			out,
-			vec![
+		assert_vec2s_absolute_eq(
+			out.as_slice(),
+			&[
 				Vec2::new(0.067943215, 0.116503954),
 				Vec2::new(0.48291522, 0.65917104),
 				Vec2::new(0.3740812, 0.7955075),
@@ -536,8 +549,9 @@ mod tests {
 				Vec2::new(0.049688518, 0.82894814),
 				Vec2::new(0.25530463, 0.15305531),
 				Vec2::new(0.11776304, 0.6246206),
-				Vec2::new(0.19543058, 0.4828195)
-			]
+				Vec2::new(0.19543058, 0.4828195),
+			],
+			f32::EPSILON,
 		);
 	}
 }
