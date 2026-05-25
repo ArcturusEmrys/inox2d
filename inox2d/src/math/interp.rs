@@ -186,6 +186,13 @@ pub fn bi_interpolate_vec2s_additive(
 	mode: InterpolateMode,
 	out: &mut VecSimd<Vec2x4>,
 ) {
+	#[cfg(all(any(target_arch = "x86_64", target_arch = "x86")))]
+	if is_x86_feature_detected!("avx2") {
+		// SAFETY: You must check CPU features before calling a function
+		// compiled using uplevel features.
+		return unsafe { x86_64_avx2::bi_interpolate_vec2s_additive_avx2(t, range_in, out_top, out_bottom, mode, out) };
+	}
+
 	for (((&otb, &ote), (&obb, &obe)), o) in (out_top.beg.flat().iter().zip(out_top.end.flat()))
 		.zip(out_bottom.beg.flat().iter().zip(out_bottom.end.flat()))
 		.zip(out.flat_mut())
@@ -199,6 +206,9 @@ pub fn bi_interpolate_vec2s_additive(
 		)
 	}
 }
+
+#[cfg(all(any(target_arch = "x86_64", target_arch = "x86")))]
+mod x86_64_avx2;
 
 #[cfg(test)]
 mod tests {
