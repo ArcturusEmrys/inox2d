@@ -1,4 +1,8 @@
 use glam::Vec2;
+use simd_aligned::arch::f32x8;
+use simd_aligned::VecSimd;
+
+use crate::math::types::Vec2x4;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum InterpolateMode {
@@ -93,11 +97,17 @@ pub fn interpolate_vec2(
 pub fn interpolate_f32s_additive(
 	t: f32,
 	range_in: InterpRange<f32>,
-	range_out: InterpRange<&[f32]>,
+	range_out: InterpRange<&VecSimd<f32x8>>,
 	mode: InterpolateMode,
-	out: &mut [f32],
+	out: &mut VecSimd<f32x8>,
 ) {
-	for ((&ob, &oe), o) in range_out.beg.iter().zip(range_out.end).zip(out) {
+	for ((&ob, &oe), o) in range_out
+		.beg
+		.flat()
+		.iter()
+		.zip(range_out.end.flat())
+		.zip(out.flat_mut())
+	{
 		*o += interpolate_f32(t, range_in, InterpRange::new(ob, oe), mode);
 	}
 }
@@ -105,11 +115,17 @@ pub fn interpolate_f32s_additive(
 pub fn interpolate_vec2s_additive(
 	t: f32,
 	range_in: InterpRange<f32>,
-	range_out: InterpRange<&[Vec2]>,
+	range_out: InterpRange<&VecSimd<Vec2x4>>,
 	mode: InterpolateMode,
-	out: &mut [Vec2],
+	out: &mut VecSimd<Vec2x4>,
 ) {
-	for ((&ob, &oe), o) in range_out.beg.iter().zip(range_out.end).zip(out) {
+	for ((&ob, &oe), o) in range_out
+		.beg
+		.flat()
+		.iter()
+		.zip(range_out.end.flat())
+		.zip(out.flat_mut())
+	{
 		*o += interpolate_vec2(t, range_in, InterpRange::new(ob, oe), mode);
 	}
 }
@@ -143,14 +159,14 @@ pub fn bi_interpolate_vec2(
 pub fn bi_interpolate_f32s_additive(
 	t: Vec2,
 	range_in: InterpRange<Vec2>,
-	out_top: InterpRange<&[f32]>,
-	out_bottom: InterpRange<&[f32]>,
+	out_top: InterpRange<&VecSimd<f32x8>>,
+	out_bottom: InterpRange<&VecSimd<f32x8>>,
 	mode: InterpolateMode,
-	out: &mut [f32],
+	out: &mut VecSimd<f32x8>,
 ) {
-	for (((&otb, &ote), (&obb, &obe)), o) in (out_top.beg.iter().zip(out_top.end))
-		.zip(out_bottom.beg.iter().zip(out_bottom.end))
-		.zip(out)
+	for (((&otb, &ote), (&obb, &obe)), o) in (out_top.beg.flat().iter().zip(out_top.end.flat()))
+		.zip(out_bottom.beg.flat().iter().zip(out_bottom.end.flat()))
+		.zip(out.flat_mut())
 	{
 		*o += bi_interpolate_f32(
 			t,
@@ -165,14 +181,14 @@ pub fn bi_interpolate_f32s_additive(
 pub fn bi_interpolate_vec2s_additive(
 	t: Vec2,
 	range_in: InterpRange<Vec2>,
-	out_top: InterpRange<&[Vec2]>,
-	out_bottom: InterpRange<&[Vec2]>,
+	out_top: InterpRange<&VecSimd<Vec2x4>>,
+	out_bottom: InterpRange<&VecSimd<Vec2x4>>,
 	mode: InterpolateMode,
-	out: &mut [Vec2],
+	out: &mut VecSimd<Vec2x4>,
 ) {
-	for (((&otb, &ote), (&obb, &obe)), o) in (out_top.beg.iter().zip(out_top.end))
-		.zip(out_bottom.beg.iter().zip(out_bottom.end))
-		.zip(out)
+	for (((&otb, &ote), (&obb, &obe)), o) in (out_top.beg.flat().iter().zip(out_top.end.flat()))
+		.zip(out_bottom.beg.flat().iter().zip(out_bottom.end.flat()))
+		.zip(out.flat_mut())
 	{
 		*o += bi_interpolate_vec2(
 			t,
@@ -187,6 +203,44 @@ pub fn bi_interpolate_vec2s_additive(
 #[cfg(test)]
 mod tests {
 	use super::*;
+	use simd_aligned::VecSimd;
+
+	/// Do the interpolation without an aligned array.
+	///
+	/// This only exists because simd_aligned doesn't provide a convenience
+	/// method for initializing aligned arrays. DO NOT actually use this in
+	/// production code as it is slow.
+	fn bi_interpolate_vec2s_additive_unaligned(
+		t: Vec2,
+		range_in: InterpRange<Vec2>,
+		out_top: InterpRange<&[Vec2]>,
+		out_bottom: InterpRange<&[Vec2]>,
+		mode: InterpolateMode,
+		out: &mut [Vec2],
+	) {
+		let mut aligned_out_top_beg = VecSimd::with(Vec2::ZERO, out_top.beg.len());
+		let mut aligned_out_top_end = VecSimd::with(Vec2::ZERO, out_top.end.len());
+		let mut aligned_out_bottom_beg = VecSimd::with(Vec2::ZERO, out_bottom.beg.len());
+		let mut aligned_out_bottom_end = VecSimd::with(Vec2::ZERO, out_bottom.end.len());
+		let mut aligned_out = VecSimd::with(Vec2::ZERO, out.len());
+
+		aligned_out_top_beg.flat_mut().copy_from_slice(out_top.beg);
+		aligned_out_top_end.flat_mut().copy_from_slice(out_top.end);
+		aligned_out_bottom_beg.flat_mut().copy_from_slice(out_bottom.beg);
+		aligned_out_bottom_end.flat_mut().copy_from_slice(out_bottom.end);
+		aligned_out.flat_mut().copy_from_slice(out);
+
+		bi_interpolate_vec2s_additive(
+			t,
+			range_in,
+			InterpRange::new(&aligned_out_top_beg, &aligned_out_top_end),
+			InterpRange::new(&aligned_out_bottom_beg, &aligned_out_bottom_end),
+			mode,
+			&mut aligned_out,
+		);
+
+		out.copy_from_slice(aligned_out.flat());
+	}
 
 	#[test]
 	fn test_linear_interpolation() {
@@ -273,7 +327,7 @@ mod tests {
 		);
 		let mut out = vec![Vec2::ZERO; 11];
 
-		bi_interpolate_vec2s_additive(
+		bi_interpolate_vec2s_additive_unaligned(
 			t,
 			range_in,
 			InterpRange::new(out_top.beg.as_slice(), out_top.end.as_slice()),
@@ -363,7 +417,7 @@ mod tests {
 		);
 		let mut out = vec![Vec2::ZERO; 11];
 
-		bi_interpolate_vec2s_additive(
+		bi_interpolate_vec2s_additive_unaligned(
 			t,
 			range_in,
 			InterpRange::new(out_top.beg.as_slice(), out_top.end.as_slice()),
@@ -392,7 +446,7 @@ mod tests {
 		let t = Vec2::new(-0.4, 0.0);
 		let mut out = vec![Vec2::ZERO; 11];
 
-		bi_interpolate_vec2s_additive(
+		bi_interpolate_vec2s_additive_unaligned(
 			t,
 			range_in,
 			InterpRange::new(out_top.beg.as_slice(), out_top.end.as_slice()),
@@ -421,7 +475,7 @@ mod tests {
 		let t = Vec2::new(-0.4, 0.4);
 		let mut out = vec![Vec2::ZERO; 11];
 
-		bi_interpolate_vec2s_additive(
+		bi_interpolate_vec2s_additive_unaligned(
 			t,
 			range_in,
 			InterpRange::new(out_top.beg.as_slice(), out_top.end.as_slice()),
@@ -450,7 +504,7 @@ mod tests {
 		let t = Vec2::new(0.4, 0.0);
 		let mut out = vec![Vec2::ZERO; 11];
 
-		bi_interpolate_vec2s_additive(
+		bi_interpolate_vec2s_additive_unaligned(
 			t,
 			range_in,
 			InterpRange::new(out_top.beg.as_slice(), out_top.end.as_slice()),

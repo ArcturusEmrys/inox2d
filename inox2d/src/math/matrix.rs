@@ -57,7 +57,9 @@ impl<T: Default + Clone> Matrix2d<T> {
 			data: vec![T::default(); width * height],
 		}
 	}
+}
 
+impl<T: Clone> Matrix2d<T> {
 	pub fn from_slice_vecs(ss: &[Vec<T>], transposed: bool) -> Result<Self, Matrix2dFromSliceVecsError> {
 		let height = ss.len();
 

@@ -1,11 +1,13 @@
 use std::collections::HashMap;
 
 use glam::{vec2, Vec2};
+use simd_aligned::VecSimd;
 
 use crate::math::{
 	deform::Deform,
 	interp::{bi_interpolate_f32, bi_interpolate_vec2s_additive, InterpRange, InterpolateMode},
 	matrix::Matrix2d,
+	types::Vec2x4,
 };
 use crate::node::{
 	components::{DeformSource, DeformStack, Mesh, TransformStore, ZSort},
@@ -31,7 +33,7 @@ pub enum BindingValues {
 	TransformRX(Matrix2d<f32>),
 	TransformRY(Matrix2d<f32>),
 	TransformRZ(Matrix2d<f32>),
-	Deform(Matrix2d<Vec<Vec2>>),
+	Deform(Matrix2d<VecSimd<Vec2x4>>),
 	// TODO
 	Opacity,
 }
@@ -185,14 +187,8 @@ impl Param {
 						.z += bi_interpolate_f32(val_normed, range_in, out_top, out_bottom, binding.interpolate_mode);
 				}
 				BindingValues::Deform(ref matrix) => {
-					let out_top = InterpRange::new(
-						matrix[(x_mindex, y_mindex)].as_slice(),
-						matrix[(x_maxdex, y_mindex)].as_slice(),
-					);
-					let out_bottom = InterpRange::new(
-						matrix[(x_mindex, y_maxdex)].as_slice(),
-						matrix[(x_maxdex, y_maxdex)].as_slice(),
-					);
+					let out_top = InterpRange::new(&matrix[(x_mindex, y_mindex)], &matrix[(x_maxdex, y_mindex)]);
+					let out_bottom = InterpRange::new(&matrix[(x_mindex, y_maxdex)], &matrix[(x_maxdex, y_maxdex)]);
 
 					// deform specified by a parameter must be direct, i.e., in the form of displacements of all vertices
 					let direct_deform = {
@@ -208,8 +204,7 @@ impl Param {
 						};
 
 						let vert_len = mesh.vertices.len();
-						let mut direct_deform: Vec<Vec2> = Vec::with_capacity(vert_len);
-						direct_deform.resize(vert_len, Vec2::ZERO);
+						let mut direct_deform: VecSimd<Vec2x4> = VecSimd::with(Vec2::ZERO, vert_len);
 
 						bi_interpolate_vec2s_additive(
 							val_normed,

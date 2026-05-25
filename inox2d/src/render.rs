@@ -12,6 +12,8 @@ use crate::node::{
 use crate::params::BindingValues;
 use crate::puppet::{InoxNodeTree, Puppet, World};
 
+use glam::Vec2;
+use simd_aligned::VecSimd;
 pub use vertex_buffers::VertexBuffers;
 
 /// Additional info per node for rendering a TexturedMesh:
@@ -35,6 +37,7 @@ pub struct CompositeRenderCtx {
 pub struct RenderCtx {
 	/// General compact data buffers for interfacing with the GPU.
 	pub vertex_buffers: VertexBuffers,
+
 	/// All nodes that need respective draw method calls:
 	/// - including standalone parts and composite parents,
 	/// - excluding (TODO: plain mesh masks) and composite children.
@@ -186,11 +189,25 @@ impl RenderCtx {
 							let render_ctx = comps.get::<TexturedMeshRenderCtx>(node.uuid).unwrap();
 							let vert_offset = render_ctx.vert_offset as usize;
 							let vert_len = render_ctx.vert_len;
-							deform_stack.combine(
-								nodes,
-								comps,
-								&mut self.vertex_buffers.deforms[vert_offset..(vert_offset + vert_len)],
-							);
+
+							// TODO: Frustratingly unnecessary copy into SIMD aligned memory.
+							//
+							// Ideally, we'd just make VertexBuffers hold a VecSimd, but we can't do that, because it
+							// would violate backwards compatibility with the renderer API. Additionally, we can't
+							// subslice a VecSimd unless we take care to ensure all our meshes are aligned to SIMD
+							// boundaries (i.e. round up to the nearest 4th Vec2).
+							//
+							// This copy will probably destroy performance, but it will at least demonstrate that the
+							// SIMD alignment improves vector codegen.
+							let mut aligned_out = VecSimd::with(Vec2::ZERO, vert_len);
+							aligned_out
+								.flat_mut()
+								.copy_from_slice(&self.vertex_buffers.deforms[vert_offset..(vert_offset + vert_len)]);
+
+							deform_stack.combine(nodes, comps, &mut aligned_out);
+
+							self.vertex_buffers.deforms[vert_offset..(vert_offset + vert_len)]
+								.copy_from_slice(aligned_out.flat());
 						}
 					}
 				}
@@ -337,7 +354,7 @@ impl<T: InoxRenderer> InoxRendererExt for T {
 	///
 	/// This does not guarantee the display of a puppet on screen due to these possible reasons:
 	/// - Only provided `InoxRenderer` method implementations are called.
-	/// 
+	///
 	/// For example, maybe the caller still need to transfer content from a texture buffer to the screen surface buffer.
 	/// - The provided `InoxRender` implementation is wrong.
 	/// - `puppet` here does not belong to the `model` this `renderer` is initialized with. This will likely result in panics for non-existent node uuids.

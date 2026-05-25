@@ -6,7 +6,8 @@ pub struct VertexBuffers {
 	pub verts: Vec<Vec2>,
 	pub uvs: Vec<Vec2>,
 	pub indices: Vec<u32>,
-	pub deforms: Vec<Vec2>,
+	pub deforms: Vec<Vec2>, // TODO: This should be VecSimd<Vec2x4>,
+	                        // but that would be a breaking API change.
 }
 
 impl Default for VertexBuffers {

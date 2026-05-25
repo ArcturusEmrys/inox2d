@@ -2,10 +2,12 @@ use std::collections::HashMap;
 
 use glam::{vec2, vec3, Vec2};
 use json::JsonValue;
+use simd_aligned::VecSimd;
 
 use crate::math::interp::InterpolateMode;
 use crate::math::matrix::{Matrix2d, Matrix2dFromSliceVecsError};
 use crate::math::transform::TransformOffset;
+use crate::math::types::Vec2x4;
 use crate::node::components::*;
 use crate::node::{InoxNode, InoxNodeUuid};
 use crate::params::{AxisPoints, Binding, BindingValues, Param, ParamUuid};
@@ -271,10 +273,10 @@ fn deserialize_vec2(vals: &[json::JsonValue]) -> InoxParseResult<Vec2> {
 	Ok(vec2(x, y))
 }
 
-fn deserialize_vec2s(vals: &[json::JsonValue]) -> InoxParseResult<Vec<Vec2>> {
-	let mut vec2s = Vec::with_capacity(vals.len());
-	for (i, vals) in vals.iter().enumerate() {
-		vec2s.push(deserialize_vec2(as_nested_list(i, vals)?)?);
+fn deserialize_vec2x4s(vals: &[json::JsonValue]) -> InoxParseResult<VecSimd<Vec2x4>> {
+	let mut vec2s = VecSimd::with(Vec2::ZERO, vals.len());
+	for (i, (vals, out_vec)) in vals.iter().zip(vec2s.flat_mut()).enumerate() {
+		*out_vec = deserialize_vec2(as_nested_list(i, vals)?)?;
 	}
 	Ok(vec2s)
 }
@@ -457,7 +459,7 @@ fn deserialize_binding_values(param_name: &str, values: &[JsonValue]) -> InoxPar
 				let nested = as_nested_list(j, vals)?;
 				let mut nested_parsed = Vec::with_capacity(nested.len());
 				for (i, vals) in nested.iter().enumerate() {
-					nested_parsed.push(deserialize_vec2s(as_nested_list(i, vals)?)?);
+					nested_parsed.push(deserialize_vec2x4s(as_nested_list(i, vals)?)?);
 				}
 				parsed.push(nested_parsed);
 			}

@@ -1,9 +1,10 @@
 use std::collections::HashMap;
 use std::mem::swap;
 
-use glam::Vec2;
+use simd_aligned::VecSimd;
 
 use crate::math::deform::{linear_combine, Deform};
+use crate::math::types::Vec2x4;
 use crate::node::components::{DeformSource, DeformStack};
 use crate::puppet::{InoxNodeTree, World};
 
@@ -23,7 +24,7 @@ impl DeformStack {
 	}
 
 	/// Combine the deformations received so far according to some rules, and write to the result
-	pub(crate) fn combine(&self, _nodes: &InoxNodeTree, _node_comps: &World, result: &mut [Vec2]) {
+	pub(crate) fn combine(&self, _nodes: &InoxNodeTree, _node_comps: &World, result: &mut VecSimd<Vec2x4>) {
 		if result.len() != self.deform_len {
 			panic!("Required output deform dimensions different from what DeformStack is initialized with.")
 		}
