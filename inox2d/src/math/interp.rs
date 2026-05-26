@@ -45,6 +45,58 @@ impl InterpRange<Vec2> {
 	}
 }
 
+pub trait EmptyRangeFixup {
+	/// Detect and remove NaNs in the output caused by ranges being identical.
+	///
+	/// Only applies when the range_out is degenerate (i.e. begin == end).
+	fn erase_nans(self, range_out: InterpRange<Self>) -> Self
+	where
+		Self: Sized;
+}
+
+impl EmptyRangeFixup for f32 {
+	fn erase_nans(self, range_out: InterpRange<Self>) -> Self {
+		if self.is_nan() && (range_out.end - range_out.beg) < f32::EPSILON {
+			range_out.beg
+		} else {
+			self
+		}
+	}
+}
+
+impl EmptyRangeFixup for Vec2 {
+	fn erase_nans(self, range_out: InterpRange<Self>) -> Self {
+		Vec2 {
+			x: self.x.erase_nans(range_out.to_x()),
+			y: self.y.erase_nans(range_out.to_y()),
+		}
+	}
+}
+
+impl EmptyRangeFixup for f32x8 {
+	fn erase_nans(self, range_out: InterpRange<Self>) -> Self {
+		let mut array = [0.0; 8];
+		for (index, ((beg, end), me)) in range_out
+			.beg
+			.as_array_ref()
+			.iter()
+			.zip(range_out.end.as_array_ref())
+			.zip(self.as_array_ref())
+			.enumerate()
+		{
+			array[index] = me.erase_nans(InterpRange::new(*beg, *end));
+		}
+
+		f32x8::new(array)
+	}
+}
+
+impl EmptyRangeFixup for Vec2x4 {
+	fn erase_nans(self, range_out: InterpRange<Self>) -> Self {
+		Vec2x4(self.0.erase_nans(InterpRange::new(range_out.beg.0, range_out.end.0)))
+	}
+}
+
 #[inline]
 fn interpolate_nearest<O>(t: f32, range_in: InterpRange<f32>, range_out: InterpRange<O>) -> O {
 	debug_assert!(
@@ -65,7 +117,7 @@ fn interpolate_nearest<O>(t: f32, range_in: InterpRange<f32>, range_out: InterpR
 #[inline]
 fn interpolate_linear<O>(t: f32, range_in: InterpRange<f32>, range_out: InterpRange<O>) -> O
 where
-	O: Copy + Add<Output = O> + Sub<Output = O> + Div<f32, Output = O>,
+	O: Copy + Add<Output = O> + Sub<Output = O> + Div<f32, Output = O> + EmptyRangeFixup,
 	f32: Mul<O, Output = O>,
 {
 	debug_assert!(
@@ -76,13 +128,14 @@ where
 		range_in.end,
 	);
 
-	(t - range_in.beg) * (range_out.end - range_out.beg) / (range_in.end - range_in.beg) + range_out.beg
+	((t - range_in.beg) * (range_out.end - range_out.beg) / (range_in.end - range_in.beg) + range_out.beg)
+		.erase_nans(range_out)
 }
 
 #[inline]
 pub fn interpolate<O>(t: f32, range_in: InterpRange<f32>, range_out: InterpRange<O>, mode: InterpolateMode) -> O
 where
-	O: Copy + Add<Output = O> + Sub<Output = O> + Div<f32, Output = O>,
+	O: Copy + Add<Output = O> + Sub<Output = O> + Div<f32, Output = O> + EmptyRangeFixup,
 	f32: Mul<O, Output = O>,
 {
 	match mode {
@@ -569,6 +622,69 @@ mod tests {
 				Vec2::new(0.11776304, 0.6246206),
 				Vec2::new(0.19543058, 0.4828195),
 			],
+			f32::EPSILON,
+		);
+	}
+
+	/// When the input or output ranges being interpolated upon are zero (i.e.
+	/// the start and end positions are the same), a naive implementation of
+	/// lerp may crash or yield NaNs.
+	#[test]
+	fn test_interpolate_linear_divide_by_zero() {
+		assert_float_eq::assert_float_absolute_eq!(
+			interpolate(
+				0.5,
+				InterpRange::new(0.0, 1.0),
+				InterpRange::new(5.0, 5.0),
+				InterpolateMode::Linear
+			),
+			5.0
+		);
+		assert!(interpolate(
+			0.5,
+			InterpRange::new(0.5, 0.5),
+			InterpRange::new(-5.0, 5.0),
+			InterpolateMode::Linear
+		)
+		.is_nan());
+		assert_float_eq::assert_float_absolute_eq!(
+			interpolate(
+				0.5,
+				InterpRange::new(0.5, 0.5),
+				InterpRange::new(5.0, 5.0),
+				InterpolateMode::Linear
+			),
+			5.0
+		);
+	}
+
+	#[test]
+	fn test_bi_interpolate_vec2s_additive_linear_divide_by_zero() {
+		let t = Vec2::new(-0.64288485, 0.42562026);
+		let range_in = InterpRange::new(Vec2::new(-0.64288485, -0.28533518), Vec2::new(-0.64288485, 0.45015025));
+		let out_top = InterpRange::new(
+			vec![Vec2::new(0.8977584, 0.80095005), Vec2::new(0.56985533, 0.072586596)],
+			vec![Vec2::new(0.8977584, 0.116503954), Vec2::new(0.48291522, 0.072586596)],
+		);
+
+		let out_bottom = InterpRange::new(
+			vec![Vec2::new(0.3036, 0.27322984), Vec2::new(0.7298904, 0.99417347)],
+			vec![Vec2::new(0.3036, 0.27322984), Vec2::new(0.7298904, 0.69804317)],
+		);
+		let mut out = vec![Vec2::ZERO; 11];
+
+		bi_interpolate_vec2s_additive_unaligned(
+			t,
+			range_in,
+			InterpRange::new(out_top.beg.as_slice(), out_top.end.as_slice()),
+			InterpRange::new(out_bottom.beg.as_slice(), out_bottom.end.as_slice()),
+			InterpolateMode::Linear,
+			&mut out,
+		);
+
+		assert_vec2s_absolute_eq(
+			out.as_slice(),
+			&[Vec2::new(0.32341647, 0.29083043), Vec2::new(0.72455287, 0.9634366)],
 			f32::EPSILON,
 		);
 	}
