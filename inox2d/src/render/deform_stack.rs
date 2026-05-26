@@ -25,7 +25,7 @@ impl DeformStack {
 
 	/// Combine the deformations received so far according to some rules, and write to the result
 	pub(crate) fn combine(&self, _nodes: &InoxNodeTree, _node_comps: &World, result: &mut VecSimd<Vec2x4>) {
-		if result.len() != self.deform_len {
+		if result.flat().len() != self.deform_len {
 			panic!("Required output deform dimensions different from what DeformStack is initialized with.")
 		}
 
@@ -43,7 +43,7 @@ impl DeformStack {
 	/// Submit a deform from a source for a node.
 	pub(crate) fn push(&mut self, src: DeformSource, mut deform: Deform) {
 		let Deform::Direct(ref direct_deform) = deform;
-		if direct_deform.len() != self.deform_len {
+		if direct_deform.flat().len() != self.deform_len {
 			panic!("A direct deform with non-matching dimensions is submitted to a node.");
 		}
 
