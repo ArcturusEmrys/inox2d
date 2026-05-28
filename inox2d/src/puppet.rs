@@ -16,7 +16,7 @@ use glam::Vec4Swizzles;
 use meta::PuppetMeta;
 use transforms::TransformCtx;
 pub use tree::InoxNodeTree;
-pub use world::{Partition, World};
+pub use world::{Partition, Query, World};
 
 /// Inochi2D puppet.
 pub struct Puppet {
@@ -128,16 +128,44 @@ impl Puppet {
 	///
 	/// Provide elapsed time for physics, if initialized, to run. Provide `0` for the first call.
 	pub fn end_frame(&mut self, dt: f32) {
+		eprintln!("=== FRAME START ===");
+		let start_time = std::time::Instant::now();
+		let mut last_time = std::time::Instant::now();
+
+		eprintln!("Param Apply:");
+
 		if let Some(param_ctx) = self.param_ctx.as_mut() {
 			param_ctx.apply(&self.params, &self.nodes, &mut self.node_comps);
 		}
+
+		let mut lap_time = std::time::Instant::now();
+
+		eprintln!(
+			"Param Apply                   : {}ms",
+			(lap_time - last_time).as_micros() as f32 / 1_000.0
+		);
+		last_time = lap_time;
 
 		if let Some(transform_ctx) = self.transform_ctx.as_mut() {
 			transform_ctx.update(&self.nodes, &mut self.node_comps);
 		}
 
+		lap_time = std::time::Instant::now();
+		eprintln!(
+			"Transform Update              : {}ms",
+			(lap_time - last_time).as_micros() as f32 / 1_000.0
+		);
+		last_time = lap_time;
+
 		if let Some(physics_ctx) = self.physics_ctx.as_mut() {
 			let values_to_apply = physics_ctx.step(&self.physics, &self.nodes, &mut self.node_comps, dt);
+
+			lap_time = std::time::Instant::now();
+			eprintln!(
+				"Physics Step                  : {}ms",
+				(lap_time - last_time).as_micros() as f32 / 1_000.0
+			);
+			last_time = lap_time;
 
 			// TODO: Think about separating DeformStack reset and RenderCtx reset?
 			self.render_ctx
@@ -145,12 +173,26 @@ impl Puppet {
 				.expect("If physics is initialized, so does params, so does rendering.")
 				.reset(&self.nodes, &mut self.node_comps);
 
+			lap_time = std::time::Instant::now();
+			eprintln!(
+				"Render Ctx Reset              : {}ms",
+				(lap_time - last_time).as_micros() as f32 / 1_000.0
+			);
+			last_time = lap_time;
+
 			// TODO: Fewer repeated calculations of a same transform?
 			let transform_ctx = self
 				.transform_ctx
 				.as_mut()
 				.expect("If physics is initialized, so does transforms.");
 			transform_ctx.reset(&self.nodes, &mut self.node_comps);
+
+			lap_time = std::time::Instant::now();
+			eprintln!(
+				"Transform Ctx Reset           : {}ms",
+				(lap_time - last_time).as_micros() as f32 / 1_000.0
+			);
+			last_time = lap_time;
 
 			let param_ctx = self
 				.param_ctx
@@ -161,14 +203,49 @@ impl Puppet {
 					.set(param_name, *value)
 					.expect("Param name returned by .step() must exist.");
 			}
+
+			lap_time = std::time::Instant::now();
+			eprintln!(
+				"Param Set                     : {}ms",
+				(lap_time - last_time).as_micros() as f32 / 1_000.0
+			);
+			last_time = lap_time;
+
+			eprintln!("Param Apply (for Physics)     :");
+
 			param_ctx.apply(&self.params, &self.nodes, &mut self.node_comps);
 
+			lap_time = std::time::Instant::now();
+			eprintln!(
+				"Param Apply (for Physics)     : {}ms",
+				(lap_time - last_time).as_micros() as f32 / 1_000.0
+			);
+			last_time = lap_time;
+
 			transform_ctx.update(&self.nodes, &mut self.node_comps);
+
+			lap_time = std::time::Instant::now();
+			eprintln!(
+				"Transform Update (for Physics): {}ms",
+				(lap_time - last_time).as_micros() as f32 / 1_000.0
+			);
+			last_time = lap_time;
 		}
+		eprintln!("Render Context                :");
 
 		if let Some(render_ctx) = self.render_ctx.as_mut() {
 			render_ctx.update(&self.nodes, &mut self.node_comps);
 		}
+
+		lap_time = std::time::Instant::now();
+		eprintln!(
+			"Render Context                : {}ms",
+			(lap_time - last_time).as_micros() as f32 / 1_000.0
+		);
+		eprintln!(
+			"=== TOTAL: {}ms ===",
+			(lap_time - start_time).as_micros() as f32 / 1_000.0
+		);
 	}
 
 	pub fn physics(&self) -> &PuppetPhysics {
@@ -186,7 +263,7 @@ impl Puppet {
 	pub fn params(&self) -> &HashMap<String, Param> {
 		&self.params
 	}
-	
+
 	/// Compute the bounds of the puppet's current state.
 	pub fn bounds(&self) -> Option<Rect> {
 		let mut out = None;

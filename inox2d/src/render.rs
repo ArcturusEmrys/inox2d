@@ -151,6 +151,8 @@ impl RenderCtx {
 
 	/// Update zsort-ordered info and deform buffer content inside self, according to updated puppet.
 	pub(crate) fn update(&mut self, nodes: &InoxNodeTree, comps: &mut World) {
+		let mut last_time = std::time::Instant::now();
+
 		let mut root_drawable_uuid_zsort_vec = Vec::<(InoxNodeUuid, f32)>::new();
 
 		// root is definitely not a drawable.
@@ -218,10 +220,24 @@ impl RenderCtx {
 		}
 
 		root_drawable_uuid_zsort_vec.sort_by(|a, b| a.1.total_cmp(&b.1).reverse());
+
+		let mut this_time = std::time::Instant::now();
+		eprintln!(
+			"  Sort drawables: {}ms",
+			(this_time - last_time).as_micros() as f32 / 1_000.0
+		);
+		last_time = this_time;
+
 		self.root_drawables_zsorted
 			.iter_mut()
 			.zip(root_drawable_uuid_zsort_vec.iter())
 			.for_each(|(old, new)| *old = new.0);
+
+		this_time = std::time::Instant::now();
+		eprintln!(
+			"  Copy          : {}ms",
+			(this_time - last_time).as_micros() as f32 / 1_000.0
+		);
 	}
 
 	/// Retrieve the list of root drawables for this render context.
