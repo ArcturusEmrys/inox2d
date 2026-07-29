@@ -48,14 +48,40 @@ impl RenderCtx {
 		let comps = &mut puppet.node_comps;
 
 		let mut nodes_to_deform = HashSet::new();
+		// BUG: 2.meshgroup's children don't appear inside the following iteration, when dynamic is on.
+		//      Instead, the meshgroup itself is in bindings.
+		//		This tells us, the static method translate the deform of the meshgroup node to its descendents
+		//		whereas the dynamic method keeps the deform in the meshgroup and compute deform of descendents
+		//		at render time
+		//      I think, static method is equivalent to a textured part controls its children
+		fn insert_children(
+			nodes: &InoxNodeTree,
+			comps: &World,
+			parent: InoxNodeUuid,
+			node_set: &mut HashSet<InoxNodeUuid>,
+		) {
+			for child in nodes.get_children(parent) {
+				if comps.get::<Mesh>(child.uuid).is_some() {
+					node_set.insert(child.uuid);
+					insert_children(nodes, comps, child.uuid, node_set);
+				}
+			}
+		}
+
+		// TODO: Refactoring and nested meshgroup. Putting this into the below loop would be better
 		for param in &puppet.params {
 			param.1.bindings.iter().for_each(|b| {
 				if matches!(b.values, BindingValues::Deform(_)) {
 					nodes_to_deform.insert(b.node);
+					// TODO: register textured mesh parts of meshgroup node when dynamic is on
+					// TODO: what is translate children??
+
+					if comps.get::<MeshGroup>(b.node).is_some() {
+						insert_children(nodes, comps, b.node, &mut nodes_to_deform);
+					}
 				}
 			});
 		}
-		// TODO: Further fill the set when Meshgroup is implemented.
 
 		let mut vertex_buffers = VertexBuffers::default();
 
@@ -111,6 +137,13 @@ impl RenderCtx {
 					}
 				};
 			}
+			// BUG: 3. The following doesn't matter (won't cause panic) to
+			//   meshgroup's children when the meshgroup node has dynamic deform
+			//   turned off. But it won't work as expected when the meshgroup
+			//   node has dynamic on, as it never apply the deform to the descendents
+			//   recursively.
+			//   On dynamic mode, children (and all descendents) do not have
+			//   deform data from the meshgroup parent in the inp file.
 
 			// MeshGroup isn't drawable, but we still need to make sure it
 			// gets a deform stack
@@ -193,6 +226,12 @@ impl RenderCtx {
 					}
 					// for TexturedMesh, obtain and write deforms into vertex_buffer
 					DrawableKind::TexturedMesh(..) => {
+						// BUG: 1.when dynamic deformation is on, meshgroup's children are not pushed on deform stack
+						// BUG: 4. Observation, it appears all the descendents share meshgroup's deform on top of their own deform
+						// BUG: 5: Solution: recursively add deform stacks of meshgroup's descendent parts (on setup)
+						//                   recursively push to deform stacks (on end_frame, every frame)
+						//                   recursively combine (why not during iteration? Yes, we have put them on the deform stack we good to go)
+						//           TODO: Update combine function to calculate children's deform contributed by the meshgroup
 						// A TexturedMesh not having an associated DeformStack means it will not be deformed at all, skip.
 						if let Some(deform_stack) = comps.get::<DeformStack>(node.uuid) {
 							let render_ctx = comps.get::<TexturedMeshRenderCtx>(node.uuid).unwrap();
@@ -206,6 +245,8 @@ impl RenderCtx {
 						}
 					}
 				}
+
+				// next we need to know why it breaks the masks/composites
 			}
 		}
 
@@ -333,8 +374,9 @@ impl<T: InoxRenderer> InoxRendererExt for T {
 			let drawable_kind = DrawableKind::new(*uuid, comps, false)
 				.expect("All children in zsorted_children_list should be a Drawable.");
 			match drawable_kind {
-				DrawableKind::TexturedMesh(components) => {
-					self.draw_textured_mesh_content(as_mask, &components, comps.get(*uuid).unwrap(), *uuid)
+				DrawableKind::TexturedMesh(_components) => {
+					// self.draw_textured_mesh_content(as_mask, &components, comps.get(*uuid).unwrap(), *uuid)
+					self.draw_drawable(as_mask, comps, *uuid)
 				}
 				DrawableKind::Composite { .. } => panic!("Composite inside Composite not allowed."),
 			}

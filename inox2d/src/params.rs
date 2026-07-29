@@ -8,10 +8,10 @@ use crate::math::{
 	matrix::Matrix2d,
 };
 use crate::node::{
-	components::{DeformSource, DeformStack, Mesh, TransformStore, ZSort},
+	components::{DeformSource, DeformStack, Mesh, MeshGroup, TransformStore, ZSort},
 	InoxNodeUuid,
 };
-use crate::puppet::{Puppet, World};
+use crate::puppet::{InoxNodeTree, Puppet, World};
 
 /// Parameter binding to a node. This allows to animate a node based on the value of the parameter that owns it.
 pub struct Binding {
@@ -75,7 +75,7 @@ impl Param {
 	///
 	/// End users may repeatedly apply a same parameter for multiple times in between frames,
 	/// but other facilities should be present to make sure this `apply()` is only called once per parameter.
-	pub(crate) fn apply(&self, val: Vec2, comps: &mut World) {
+	pub(crate) fn apply(&self, val: Vec2, nodes: &InoxNodeTree, comps: &mut World) {
 		let val = val.clamp(self.min, self.max);
 		let val_normed = (val - self.min) / (self.max - self.min);
 
@@ -108,12 +108,19 @@ impl Param {
 
 		// Apply offset on each binding
 		for binding in &self.bindings {
-			let range_in = InterpRange::new(
+			let mut range_in = InterpRange::new(
 				vec2(self.axis_points.x[x_mindex], self.axis_points.y[y_mindex]),
 				vec2(self.axis_points.x[x_maxdex], self.axis_points.y[y_maxdex]),
 			);
 
 			let val_normed = val_normed.clamp(range_in.beg, range_in.end);
+			// Safety check: Avoid division by zero in interpolation
+			if (range_in.end.x - range_in.beg.x).abs() < 1e-6 {
+				range_in.end.x += 1.0;
+			}
+			if (range_in.end.y - range_in.beg.y).abs() < 1e-6 {
+				range_in.end.y += 1.0;
+			}
 
 			match binding.values {
 				BindingValues::ZSort(ref matrix) => {
@@ -194,37 +201,123 @@ impl Param {
 						matrix[(x_maxdex, y_maxdex)].as_slice(),
 					);
 
-					// deform specified by a parameter must be direct, i.e., in the form of displacements of all vertices
-					let direct_deform = {
-						let mesh = comps
-							.get::<Mesh>(binding.node)
-							.expect("Deform param target must have an associated Mesh.");
+					// case Meshgroup
+					if comps.get::<MeshGroup>(binding.node).is_some() {
+						let direct_deform = {
+							let mesh = comps.get::<Mesh>(binding.node).unwrap_or_else(|| {
+								panic!(
+									"Deform param target must have an associated Mesh. (Binding Node ID: {:?})",
+									binding.node.0
+								)
+							});
 
-						let vert_len = mesh.vertices.len();
-						let mut direct_deform: Vec<Vec2> = Vec::with_capacity(vert_len);
-						direct_deform.resize(vert_len, Vec2::ZERO);
+							let vert_len = mesh.vertices.len();
+							let mut direct_deform: Vec<Vec2> = Vec::with_capacity(vert_len);
+							direct_deform.resize(vert_len, Vec2::ZERO);
 
-						bi_interpolate_vec2s_additive(
-							val_normed,
-							range_in,
-							out_top,
-							out_bottom,
-							binding.interpolate_mode,
-							&mut direct_deform,
-						);
+							bi_interpolate_vec2s_additive(
+								val_normed,
+								range_in,
+								out_top,
+								out_bottom,
+								binding.interpolate_mode,
+								&mut direct_deform,
+							);
+							// direct_deform is the vec of mesh points' new relative
+							//     coordinates to their origin (in the test example they
+							//     are points on the square mesh)
+							direct_deform
+						};
+						// It's pushed whenever a deform binding of this node is found
+						// can we put descendent to the deform stack with
+						comps
+							.get_mut::<DeformStack>(binding.node)
+							.expect("Nodes being deformed must have a DeformStack component.")
+							.push(DeformSource::Param(self.uuid), Deform::Direct(direct_deform.clone()));
+						// For each meshed descendent, push with DeformSource::MeshGroup(), Deform::FromMeshGroup()
+						// and then later apply with a different combine
+						if comps.get::<MeshGroup>(binding.node).unwrap().dynamic {
+							push_children(
+								nodes,
+								comps,
+								&direct_deform,
+								binding.node,
+								binding.node,
+								// TransformOffset::default().to_matrix(), // Can't use abs transform because bindings may be applied
+								val,
+							);
+						}
+					} else {
+						// deform specified by a parameter must be direct, i.e., in the form of displacements of all vertices
+						let direct_deform = {
+							let mesh = comps.get::<Mesh>(binding.node).unwrap_or_else(|| {
+								panic!(
+									"Deform param target must have an associated Mesh. (Binding Node ID: {:?})",
+									binding.node.0
+								)
+							});
 
-						direct_deform
-					};
+							let vert_len = mesh.vertices.len();
+							let mut direct_deform: Vec<Vec2> = Vec::with_capacity(vert_len);
+							direct_deform.resize(vert_len, Vec2::ZERO);
 
-					comps
-						.get_mut::<DeformStack>(binding.node)
-						.expect("Nodes being deformed must have a DeformStack component.")
-						.push(DeformSource::Param(self.uuid), Deform::Direct(direct_deform));
+							bi_interpolate_vec2s_additive(
+								val_normed,
+								range_in,
+								out_top,
+								out_bottom,
+								binding.interpolate_mode,
+								&mut direct_deform,
+							);
+
+							direct_deform
+						};
+
+						comps
+							.get_mut::<DeformStack>(binding.node)
+							.expect("Nodes being deformed must have a DeformStack component.")
+							.push(DeformSource::Param(self.uuid), Deform::Direct(direct_deform));
+					}
 				}
 				// TODO
 				BindingValues::Opacity => {}
 			}
 		}
+	}
+}
+
+fn push_children(
+	nodes: &InoxNodeTree,
+	comps: &mut World,
+	meshgroup_deform: &Vec<Vec2>,
+	meshgroup_uuid: InoxNodeUuid,
+	parent_uuid: InoxNodeUuid,
+	val: Vec2,
+) {
+	for child in nodes.get_children(parent_uuid) {
+		if comps.get::<MeshGroup>(child.uuid).is_some() {
+			// TODO: how nested meshgroup works:
+			//      Meshgroup A and its descendent Meshgroup B
+			//      Meshgroup B's mesh is affected by Meshgroup A's deform
+			//      children of meshgroup B gets deform computed from it, NOT meshgroup A
+			//      Therefore, order of applying deform
+			//          = the deform of children of mgB
+			//          = children's own deform + deform computed from mgB
+			//          = children's own deform + (mgB's own deform + deform for mgB computed from mgA)
+			//
+			todo!("Nested MeshGroup detected");
+		}
+		// Forgot to put translation of each node to its parent
+		// the engine only uses relative position to parent for location
+
+		if comps.get::<DeformStack>(child.uuid).is_some() {
+			comps.get_mut::<DeformStack>(child.uuid).unwrap().push(
+				DeformSource::MeshGroup(meshgroup_uuid),
+				Deform::FromMeshGroup(meshgroup_deform.to_vec(), child.uuid),
+			);
+		}
+		// don't forget to push descendents recursively
+		push_children(nodes, comps, meshgroup_deform, meshgroup_uuid, child.uuid, val);
 	}
 }
 
@@ -258,12 +351,12 @@ impl ParamCtx {
 	}
 
 	/// Modify components as specified by all params. Must be called ONCE per frame.
-	pub(crate) fn apply(&self, params: &HashMap<String, Param>, comps: &mut World) {
+	pub(crate) fn apply(&self, params: &HashMap<String, Param>, nodes: &InoxNodeTree, comps: &mut World) {
 		// a correct implementation should not care about the order of `.apply()`
 		for (param_name, val) in self.values.iter() {
 			// TODO: a correct implementation should not fail on param value (0, 0)
 			if *val != Vec2::ZERO {
-				params.get(param_name).unwrap().apply(*val, comps);
+				params.get(param_name).unwrap().apply(*val, nodes, comps);
 			}
 		}
 	}

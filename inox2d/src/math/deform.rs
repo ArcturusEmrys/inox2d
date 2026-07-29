@@ -1,10 +1,14 @@
 use glam::{Mat2, Vec2};
 
+use crate::node::InoxNodeUuid;
+
 /// Different kinds of deform.
 // TODO: Meshgroup.
 pub(crate) enum Deform {
 	/// Specifying a displacement for every vertex.
 	Direct(Vec<Vec2>),
+	/// MESHGROUP_ATTEMPT #1
+	FromMeshGroup(Vec<Vec2>, InoxNodeUuid),
 }
 
 /// Element-wise add direct deforms up and write result.
