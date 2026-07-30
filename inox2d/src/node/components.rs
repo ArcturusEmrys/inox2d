@@ -211,7 +211,7 @@ pub struct MeshGroup {
 #[derive(Hash, PartialEq, Eq, Copy, Clone)]
 pub(crate) enum DeformSource {
 	Param(ParamUuid),
-	MeshGroup(InoxNodeUuid),
+	MeshGroup(ParamUuid, InoxNodeUuid),
 }
 
 /// Internal component solving for deforms of a node.

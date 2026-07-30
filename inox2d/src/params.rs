@@ -237,15 +237,7 @@ impl Param {
 						// For each meshed descendent, push with DeformSource::MeshGroup(), Deform::FromMeshGroup()
 						// and then later apply with a different combine
 						if comps.get::<MeshGroup>(binding.node).unwrap().dynamic {
-							push_children(
-								nodes,
-								comps,
-								&direct_deform,
-								binding.node,
-								binding.node,
-								// TransformOffset::default().to_matrix(), // Can't use abs transform because bindings may be applied
-								val,
-							);
+							push_children(nodes, comps, self.uuid, &direct_deform, binding.node, binding.node);
 						}
 					} else {
 						// deform specified by a parameter must be direct, i.e., in the form of displacements of all vertices
@@ -289,35 +281,33 @@ impl Param {
 fn push_children(
 	nodes: &InoxNodeTree,
 	comps: &mut World,
+	param_uuid: ParamUuid,
 	meshgroup_deform: &Vec<Vec2>,
 	meshgroup_uuid: InoxNodeUuid,
 	parent_uuid: InoxNodeUuid,
-	val: Vec2,
 ) {
 	for child in nodes.get_children(parent_uuid) {
 		if comps.get::<MeshGroup>(child.uuid).is_some() {
-			// TODO: how nested meshgroup works:
-			//      Meshgroup A and its descendent Meshgroup B
-			//      Meshgroup B's mesh is affected by Meshgroup A's deform
+			// TODO: how nested meshgroup works with dynamic off:
+			//      Meshgroup A (dy off) and its descendent Meshgroup B (dy on)
+			//      Meshgroup B's mesh is affected by Meshgroup A's deform (but it's already exported)
 			//      children of meshgroup B gets deform computed from it, NOT meshgroup A
 			//      Therefore, order of applying deform
 			//          = the deform of children of mgB
 			//          = children's own deform + deform computed from mgB
 			//          = children's own deform + (mgB's own deform + deform for mgB computed from mgA)
+			//      when dynamic on, the descendent meshgroups dont get affected
 			//
-			todo!("Nested MeshGroup detected");
+			// todo!("Nested MeshGroup detected");
+			continue;
 		}
-		// Forgot to put translation of each node to its parent
-		// the engine only uses relative position to parent for location
-
 		if comps.get::<DeformStack>(child.uuid).is_some() {
 			comps.get_mut::<DeformStack>(child.uuid).unwrap().push(
-				DeformSource::MeshGroup(meshgroup_uuid),
+				DeformSource::MeshGroup(param_uuid, meshgroup_uuid),
 				Deform::FromMeshGroup(meshgroup_deform.to_vec(), child.uuid),
 			);
 		}
-		// don't forget to push descendents recursively
-		push_children(nodes, comps, meshgroup_deform, meshgroup_uuid, child.uuid, val);
+		push_children(nodes, comps, param_uuid, meshgroup_deform, meshgroup_uuid, child.uuid);
 	}
 }
 

@@ -40,7 +40,7 @@ impl DeformStack {
 			if enabled_deform.0 {
 				match (&deform_source, &enabled_deform.1) {
 					(DeformSource::Param(_), Deform::Direct(ref direct_deform)) => Some(direct_deform),
-					(DeformSource::MeshGroup(mg_uuid), Deform::FromMeshGroup(ref mg_deform, ref node_uuid)) => {
+					(DeformSource::MeshGroup(_, mg_uuid), Deform::FromMeshGroup(ref mg_deform, ref node_uuid)) => {
 						maybe_meshgroup_uuid = Some(mg_uuid);
 						maybe_meshgroup_deform = Some(mg_deform);
 						maybe_node_id = Some(node_uuid);

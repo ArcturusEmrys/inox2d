@@ -73,11 +73,12 @@ impl RenderCtx {
 			param.1.bindings.iter().for_each(|b| {
 				if matches!(b.values, BindingValues::Deform(_)) {
 					nodes_to_deform.insert(b.node);
-					// TODO: register textured mesh parts of meshgroup node when dynamic is on
 					// TODO: what is translate children??
 
-					if comps.get::<MeshGroup>(b.node).is_some() {
-						insert_children(nodes, comps, b.node, &mut nodes_to_deform);
+					if let Some(meshgroup) = comps.get::<MeshGroup>(b.node) {
+						if meshgroup.dynamic {
+							insert_children(nodes, comps, b.node, &mut nodes_to_deform);
+						}
 					}
 				}
 			});
