@@ -189,7 +189,7 @@ impl<'mesh> MeshBitMask<'mesh> {
 	}
 
 	/// Return the index of the triangle point `p` is in, if any.
-	pub fn test(&self, p: Vec2) -> Option<u16> {
+	pub fn test(&self, p: &Vec2) -> Option<u16> {
 		// handle empty mesh case
 		if self.mask.is_empty() {
 			return None;
@@ -208,7 +208,7 @@ impl<'mesh> MeshBitMask<'mesh> {
 
 		candidates
 			.into_iter()
-			.find(|&t| is_point_in_triangle(p, &self.mesh.get_triangle(t)))
+			.find(|&t| is_point_in_triangle(*p, &self.mesh.get_triangle(t)))
 	}
 }
 
@@ -325,7 +325,7 @@ mod tests {
 			test_with_mesh(*transform, |mesh, ps| {
 				let bit_mask = MeshBitMask::new(mesh);
 
-				ps.into_iter().map(|p| bit_mask.test(p)).collect()
+				ps.into_iter().map(|p| bit_mask.test(&p)).collect()
 			})
 		})
 	}
@@ -342,7 +342,7 @@ mod tests {
 
 		assert_eq!(bit_mask.width, 0);
 		assert_eq!(bit_mask.height, 0);
-		assert_eq!(bit_mask.test(vec2(-1.0, 0.0)), None);
-		assert_eq!(bit_mask.test(vec2(1.0, 2.0)), None);
+		assert_eq!(bit_mask.test(&vec2(-1.0, 0.0)), None);
+		assert_eq!(bit_mask.test(&vec2(1.0, 2.0)), None);
 	}
 }

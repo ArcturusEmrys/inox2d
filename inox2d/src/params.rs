@@ -223,19 +223,14 @@ impl Param {
 								binding.interpolate_mode,
 								&mut direct_deform,
 							);
-							// direct_deform is the vec of mesh points' new relative
-							//     coordinates to their origin (in the test example they
-							//     are points on the square mesh)
 							direct_deform
 						};
-						// It's pushed whenever a deform binding of this node is found
-						// can we put descendent to the deform stack with
 						comps
 							.get_mut::<DeformStack>(binding.node)
 							.expect("Nodes being deformed must have a DeformStack component.")
 							.push(DeformSource::Param(self.uuid), Deform::Direct(direct_deform.clone()));
-						// For each meshed descendent, push with DeformSource::MeshGroup(), Deform::FromMeshGroup()
-						// and then later apply with a different combine
+						
+						// Push deform data of descendants from meshgroup onto deform stack
 						if comps.get::<MeshGroup>(binding.node).unwrap().dynamic {
 							push_children(nodes, comps, self.uuid, &direct_deform, binding.node, binding.node);
 						}
@@ -288,17 +283,6 @@ fn push_children(
 ) {
 	for child in nodes.get_children(parent_uuid) {
 		if comps.get::<MeshGroup>(child.uuid).is_some() {
-			// TODO: how nested meshgroup works with dynamic off:
-			//      Meshgroup A (dy off) and its descendent Meshgroup B (dy on)
-			//      Meshgroup B's mesh is affected by Meshgroup A's deform (but it's already exported)
-			//      children of meshgroup B gets deform computed from it, NOT meshgroup A
-			//      Therefore, order of applying deform
-			//          = the deform of children of mgB
-			//          = children's own deform + deform computed from mgB
-			//          = children's own deform + (mgB's own deform + deform for mgB computed from mgA)
-			//      when dynamic on, the descendent meshgroups dont get affected
-			//
-			// todo!("Nested MeshGroup detected");
 			continue;
 		}
 		if comps.get::<DeformStack>(child.uuid).is_some() {
