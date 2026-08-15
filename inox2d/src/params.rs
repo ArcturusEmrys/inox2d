@@ -108,19 +108,10 @@ impl Param {
 
 		// Apply offset on each binding
 		for binding in &self.bindings {
-			let mut range_in = InterpRange::new(
+			let range_in = InterpRange::new(
 				vec2(self.axis_points.x[x_mindex], self.axis_points.y[y_mindex]),
 				vec2(self.axis_points.x[x_maxdex], self.axis_points.y[y_maxdex]),
 			);
-
-			let val_normed = val_normed.clamp(range_in.beg, range_in.end);
-			// Safety check: Avoid division by zero in interpolation
-			if (range_in.end.x - range_in.beg.x).abs() < 1e-6 {
-				range_in.end.x += 1.0;
-			}
-			if (range_in.end.y - range_in.beg.y).abs() < 1e-6 {
-				range_in.end.y += 1.0;
-			}
 
 			match binding.values {
 				BindingValues::ZSort(ref matrix) => {

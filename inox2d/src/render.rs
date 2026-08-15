@@ -356,8 +356,7 @@ impl<T: InoxRenderer> InoxRendererExt for T {
 				.expect("All children in zsorted_children_list should be a Drawable.");
 			match drawable_kind {
 				DrawableKind::TexturedMesh(components) => {
-					// self.draw_textured_mesh_content(as_mask, &components, comps.get(*uuid).unwrap(), *uuid)
-					self.draw_drawable(as_mask, comps, *uuid)
+					self.draw_textured_mesh_content(as_mask, &components, comps.get(*uuid).unwrap(), *uuid)					
 				}
 				DrawableKind::Composite { .. } => panic!("Composite inside Composite not allowed."),
 			}
