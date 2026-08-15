@@ -8,10 +8,10 @@ use crate::math::{
 	matrix::Matrix2d,
 };
 use crate::node::{
-	components::{DeformSource, DeformStack, Mesh, TransformStore, ZSort},
+	components::{DeformSource, DeformStack, Mesh, MeshGroup, TransformStore, ZSort},
 	InoxNodeUuid,
 };
-use crate::puppet::{Puppet, World};
+use crate::puppet::{InoxNodeTree, Puppet, World};
 
 /// Parameter binding to a node. This allows to animate a node based on the value of the parameter that owns it.
 pub struct Binding {
@@ -75,7 +75,7 @@ impl Param {
 	///
 	/// End users may repeatedly apply a same parameter for multiple times in between frames,
 	/// but other facilities should be present to make sure this `apply()` is only called once per parameter.
-	pub(crate) fn apply(&self, val: Vec2, comps: &mut World) {
+	pub(crate) fn apply(&self, val: Vec2, nodes: &InoxNodeTree, comps: &mut World) {
 		let val = val.clamp(self.min, self.max);
 		let val_normed = (val - self.min) / (self.max - self.min);
 
@@ -112,8 +112,6 @@ impl Param {
 				vec2(self.axis_points.x[x_mindex], self.axis_points.y[y_mindex]),
 				vec2(self.axis_points.x[x_maxdex], self.axis_points.y[y_maxdex]),
 			);
-
-			let val_normed = val_normed.clamp(range_in.beg, range_in.end);
 
 			match binding.values {
 				BindingValues::ZSort(ref matrix) => {
@@ -194,37 +192,97 @@ impl Param {
 						matrix[(x_maxdex, y_maxdex)].as_slice(),
 					);
 
-					// deform specified by a parameter must be direct, i.e., in the form of displacements of all vertices
-					let direct_deform = {
-						let mesh = comps
-							.get::<Mesh>(binding.node)
-							.expect("Deform param target must have an associated Mesh.");
+					// case Meshgroup
+					if comps.get::<MeshGroup>(binding.node).is_some() {
+						let direct_deform = {
+							let mesh = comps.get::<Mesh>(binding.node).unwrap_or_else(|| {
+								panic!(
+									"Deform param target must have an associated Mesh. (Binding Node ID: {:?})",
+									binding.node.0
+								)
+							});
 
-						let vert_len = mesh.vertices.len();
-						let mut direct_deform: Vec<Vec2> = Vec::with_capacity(vert_len);
-						direct_deform.resize(vert_len, Vec2::ZERO);
+							let vert_len = mesh.vertices.len();
+							let mut direct_deform: Vec<Vec2> = Vec::with_capacity(vert_len);
+							direct_deform.resize(vert_len, Vec2::ZERO);
 
-						bi_interpolate_vec2s_additive(
-							val_normed,
-							range_in,
-							out_top,
-							out_bottom,
-							binding.interpolate_mode,
-							&mut direct_deform,
-						);
+							bi_interpolate_vec2s_additive(
+								val_normed,
+								range_in,
+								out_top,
+								out_bottom,
+								binding.interpolate_mode,
+								&mut direct_deform,
+							);
+							direct_deform
+						};
+						comps
+							.get_mut::<DeformStack>(binding.node)
+							.expect("Nodes being deformed must have a DeformStack component.")
+							.push(DeformSource::Param(self.uuid), Deform::Direct(direct_deform.clone()));
+						
+						// Push deform data of descendants from meshgroup onto deform stack
+						if comps.get::<MeshGroup>(binding.node).unwrap().dynamic {
+							push_children(nodes, comps, self.uuid, &direct_deform, binding.node, binding.node);
+						}
+					} else {
+						// deform specified by a parameter must be direct, i.e., in the form of displacements of all vertices
+						let direct_deform = {
+							let mesh = comps.get::<Mesh>(binding.node).unwrap_or_else(|| {
+								panic!(
+									"Deform param target must have an associated Mesh. (Binding Node ID: {:?})",
+									binding.node.0
+								)
+							});
 
-						direct_deform
-					};
+							let vert_len = mesh.vertices.len();
+							let mut direct_deform: Vec<Vec2> = Vec::with_capacity(vert_len);
+							direct_deform.resize(vert_len, Vec2::ZERO);
 
-					comps
-						.get_mut::<DeformStack>(binding.node)
-						.expect("Nodes being deformed must have a DeformStack component.")
-						.push(DeformSource::Param(self.uuid), Deform::Direct(direct_deform));
+							bi_interpolate_vec2s_additive(
+								val_normed,
+								range_in,
+								out_top,
+								out_bottom,
+								binding.interpolate_mode,
+								&mut direct_deform,
+							);
+
+							direct_deform
+						};
+
+						comps
+							.get_mut::<DeformStack>(binding.node)
+							.expect("Nodes being deformed must have a DeformStack component.")
+							.push(DeformSource::Param(self.uuid), Deform::Direct(direct_deform));
+					}
 				}
 				// TODO
 				BindingValues::Opacity => {}
 			}
 		}
+	}
+}
+
+fn push_children(
+	nodes: &InoxNodeTree,
+	comps: &mut World,
+	param_uuid: ParamUuid,
+	meshgroup_deform: &Vec<Vec2>,
+	meshgroup_uuid: InoxNodeUuid,
+	parent_uuid: InoxNodeUuid,
+) {
+	for child in nodes.get_children(parent_uuid) {
+		if comps.get::<MeshGroup>(child.uuid).is_some() {
+			continue;
+		}
+		if comps.get::<DeformStack>(child.uuid).is_some() {
+			comps.get_mut::<DeformStack>(child.uuid).unwrap().push(
+				DeformSource::MeshGroup(param_uuid, meshgroup_uuid),
+				Deform::FromMeshGroup(meshgroup_deform.to_vec(), child.uuid),
+			);
+		}
+		push_children(nodes, comps, param_uuid, meshgroup_deform, meshgroup_uuid, child.uuid);
 	}
 }
 
@@ -258,12 +316,12 @@ impl ParamCtx {
 	}
 
 	/// Modify components as specified by all params. Must be called ONCE per frame.
-	pub(crate) fn apply(&self, params: &HashMap<String, Param>, comps: &mut World) {
+	pub(crate) fn apply(&self, params: &HashMap<String, Param>, nodes: &InoxNodeTree, comps: &mut World) {
 		// a correct implementation should not care about the order of `.apply()`
 		for (param_name, val) in self.values.iter() {
 			// TODO: a correct implementation should not fail on param value (0, 0)
 			if *val != Vec2::ZERO {
-				params.get(param_name).unwrap().apply(*val, comps);
+				params.get(param_name).unwrap().apply(*val, nodes, comps);
 			}
 		}
 	}

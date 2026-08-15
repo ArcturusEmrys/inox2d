@@ -48,14 +48,36 @@ impl RenderCtx {
 		let comps = &mut puppet.node_comps;
 
 		let mut nodes_to_deform = HashSet::new();
+		
+		fn insert_children(
+			nodes: &InoxNodeTree,
+			comps: &World,
+			parent: InoxNodeUuid,
+			node_set: &mut HashSet<InoxNodeUuid>,
+		) {
+			for child in nodes.get_children(parent) {
+				if comps.get::<Mesh>(child.uuid).is_some() {
+					node_set.insert(child.uuid);
+					insert_children(nodes, comps, child.uuid, node_set);
+				}
+			}
+		}
+
+		// TODO: Refactoring and nested meshgroup. Maybe putting this into the below loop would be better?
 		for param in &puppet.params {
 			param.1.bindings.iter().for_each(|b| {
 				if matches!(b.values, BindingValues::Deform(_)) {
 					nodes_to_deform.insert(b.node);
+					// TODO: what is translate children??
+
+					if let Some(meshgroup) = comps.get::<MeshGroup>(b.node) {
+						if meshgroup.dynamic {
+							insert_children(nodes, comps, b.node, &mut nodes_to_deform);
+						}
+					}
 				}
 			});
 		}
-		// TODO: Further fill the set when Meshgroup is implemented.
 
 		let mut vertex_buffers = VertexBuffers::default();
 
@@ -334,7 +356,7 @@ impl<T: InoxRenderer> InoxRendererExt for T {
 				.expect("All children in zsorted_children_list should be a Drawable.");
 			match drawable_kind {
 				DrawableKind::TexturedMesh(components) => {
-					self.draw_textured_mesh_content(as_mask, &components, comps.get(*uuid).unwrap(), *uuid)
+					self.draw_textured_mesh_content(as_mask, &components, comps.get(*uuid).unwrap(), *uuid)					
 				}
 				DrawableKind::Composite { .. } => panic!("Composite inside Composite not allowed."),
 			}

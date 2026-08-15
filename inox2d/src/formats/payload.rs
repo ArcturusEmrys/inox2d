@@ -91,7 +91,7 @@ fn deserialize_node(obj: JsonObject) -> InoxParseResult<ParsedNode> {
 	Ok(ParsedNode {
 		node: InoxNode {
 			uuid: InoxNodeUuid(obj.get_u32("uuid")?),
-			name: obj.get_str("name")?.to_owned(),
+			name: obj.get_str("name")?.trim_end_matches('\0').to_owned(),
 			enabled: obj.get_bool("enabled")?,
 			zsort: obj.get_f32("zsort")?,
 			trans_offset: vals("transform", deserialize_transform(obj.get_object("transform")?))?,
@@ -226,7 +226,7 @@ fn deserialize_mesh(obj: JsonObject) -> InoxParseResult<Mesh> {
 
 	let uvs = match uvs {
 		Ok(uvs) => uvs,
-		Err(e) => vec![],
+		Err(_e) => vec![],
 	};
 
 	Ok(Mesh {
@@ -415,7 +415,7 @@ fn deserialize_params(vals: &[json::JsonValue]) -> InoxParseResult<HashMap<Strin
 }
 
 fn deserialize_param(obj: JsonObject) -> InoxParseResult<(String, Param)> {
-	let name = obj.get_str("name")?.to_owned();
+	let name = obj.get_str("name")?.trim_end_matches('\0').to_owned();
 	Ok((
 		name.clone(),
 		Param {
