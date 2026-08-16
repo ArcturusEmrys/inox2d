@@ -1,25 +1,85 @@
-use glam::{Mat2, Vec2};
+use crate::{math::triangle::MeshBitMask, node::components::Mesh};
+use glam::{Mat2, Mat4, Vec2, Vec4, Vec4Swizzles};
+use std::collections::HashMap;
 
 /// Different kinds of deform.
 // TODO: Meshgroup.
 pub(crate) enum Deform {
 	/// Specifying a displacement for every vertex.
 	Direct(Vec<Vec2>),
+
+	/// Apply the source's deformation to each vertex.
+	///
+	/// The Mat4 specifies the transform from this node's coordinates to the
+	/// source mesh specifying the deformation.
+	Source(Mat4),
 }
 
-/// Element-wise add direct deforms up and write result.
-pub(crate) fn linear_combine<'deforms>(direct_deforms: impl Iterator<Item = &'deforms Vec<Vec2>>, result: &mut [Vec2]) {
-	result.iter_mut().for_each(|deform| *deform = Vec2::ZERO);
+/// Element-wise add a single direct deform up and write result.
+pub(crate) fn linear_combine(direct_deform: &[Vec2], result: &mut [Vec2]) {
+	if direct_deform.len() != result.len() {
+		panic!("Trying to combine direct deformations with wrong dimensions.");
+	}
 
-	for direct_deform in direct_deforms {
-		if direct_deform.len() != result.len() {
-			panic!("Trying to combine direct deformations with wrong dimensions.");
+	result
+		.iter_mut()
+		.zip(direct_deform.iter())
+		.for_each(|(sum, addition)| *sum += *addition);
+}
+
+/// Element-wise apply a foreign mesh's deforms to the result mesh and write
+/// result.
+///
+/// To help visualize this, imagine if the result mesh's vertices were somehow
+/// part of the texture of the foreign mesh, and we applied the deform that way.
+/// Each result vert is assigned to a triangle of the foreign mesh, and then
+/// that triangle's deforms are applied to the result vert based on the
+/// barycentric distance to each foreign triangle vert.
+///
+/// Also, the result mesh is treated as if the result deform were already
+/// applied, meaning this transform is non-linear.
+pub(crate) fn foreign_mesh_combine(
+	foreign_mesh: &Mesh,
+	foreign_deform: &[Vec2],
+	testing_mask: &MeshBitMask,
+	result_mesh: &Mesh,
+	result_to_foreign: Mat4,
+	result: &mut [Vec2],
+) {
+	if result_mesh.vertices.len() != result.len() {
+		panic!("Trying to combine a foreign mesh deformation with wrong dimensions.");
+	}
+
+	let mut triangle_bins = HashMap::new();
+	for (index, (result_vert, result_deform)) in result_mesh.vertices.iter().zip(result.iter()).enumerate() {
+		let result_vert_applied = *result_vert + *result_deform;
+		let result_vert_foreign = result_to_foreign * Vec4::new(result_vert_applied.x, result_vert_applied.y, 0.0, 1.0);
+
+		if let Some(triangle_start_index) = testing_mask.test(result_vert_foreign.xy(), foreign_mesh) {
+			let (indexes, verts) = triangle_bins.entry(triangle_start_index).or_insert((vec![], vec![]));
+
+			indexes.push(index);
+			verts.push(result_vert_foreign.xy());
+		} else {
+			// TODO: Inochi appears to have a slightly different triangle test
+			// to ours - verts that are on the edge of a triangle appear to map
+			// to one of them anyway. Our own triangle tests assume this cannot
+			// happen.
 		}
+	}
 
-		result
-			.iter_mut()
-			.zip(direct_deform.iter())
-			.for_each(|(sum, addition)| *sum += *addition);
+	for (triangle_start_index, (vert_indexes, verts)) in triangle_bins.iter_mut() {
+		let triangle = foreign_mesh.get_triangle(*triangle_start_index);
+		let triangle_deforms = foreign_mesh.get_triangle_deforms(*triangle_start_index, foreign_deform);
+		let decompose_matrix = vector_decompose_matrix(triangle[1] - triangle[0], triangle[2] - triangle[0]);
+
+		//TODO: I'm pretty sure we're supposed to be giving points in batches,
+		//but I'm too lazy to write a binning scheme for triangles.
+		let deforms = deform_by_parent_triangle(&decompose_matrix, triangle[0], &triangle_deforms, verts.iter());
+
+		for (vert_index, deform) in vert_indexes.into_iter().zip(deforms) {
+			result[*vert_index] += deform;
+		}
 	}
 }
 

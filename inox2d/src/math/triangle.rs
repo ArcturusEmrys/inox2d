@@ -1,4 +1,4 @@
-use std::num::NonZeroU16;
+use std::num::NonZeroU32;
 
 use glam::{Mat2, Vec2};
 
@@ -40,7 +40,7 @@ fn get_bounds<'a>(vertices: impl Iterator<Item = &'a Vec2>) -> (Vec2, Vec2) {
 
 impl Mesh {
 	/// The `i`-th triangle as described by `self.indices`.
-	pub fn get_triangle(&self, i: u16) -> [Vec2; 3] {
+	pub fn get_triangle(&self, i: u32) -> [Vec2; 3] {
 		[
 			self.vertices[self.indices[3 * i as usize] as usize],
 			self.vertices[self.indices[(3 * i + 1) as usize] as usize],
@@ -48,10 +48,18 @@ impl Mesh {
 		]
 	}
 
+	pub fn get_triangle_deforms(&self, i: u32, deforms: &[Vec2]) -> [Vec2; 3] {
+		[
+			deforms[self.indices[3 * i as usize] as usize],
+			deforms[self.indices[(3 * i + 1) as usize] as usize],
+			deforms[self.indices[(3 * i + 2) as usize] as usize],
+		]
+	}
+
 	/// Find which triangle of the mesh is a point in, if any, by brute force.
-	pub fn test<'a>(&'a self, ps: impl Iterator<Item = &'a Vec2> + 'a) -> impl Iterator<Item = Option<u16>> + 'a {
+	pub fn test<'a>(&'a self, ps: impl Iterator<Item = &'a Vec2> + 'a) -> impl Iterator<Item = Option<u32>> + 'a {
 		ps.map(|p| {
-			(0..(self.indices.len() / 3) as u16).find(|&i| {
+			(0..(self.indices.len() / 3) as u32).find(|&i| {
 				let triangle = self.get_triangle(i);
 				is_point_in_triangle(*p, &triangle)
 			})
@@ -60,8 +68,7 @@ impl Mesh {
 }
 
 /// Cache for efficient mesh testing (which triangle is a point in?)
-pub struct MeshBitMask<'mesh> {
-	mesh: &'mesh Mesh,
+pub struct MeshBitMask {
 	top_left: Vec2,
 	// "Grid size" of the mask. The ref impl uses `1.0`.
 	x_step: f32,
@@ -72,10 +79,10 @@ pub struct MeshBitMask<'mesh> {
 	/// Else `Some(i)`, the point belongs to triangle made up of `mesh.indices[3*(i-1):3*i]`.
 	///
 	/// NOTE THE +1 in `i` here!
-	mask: Vec<Option<NonZeroU16>>,
+	mask: Vec<Option<NonZeroU32>>,
 }
 
-impl<'mesh> MeshBitMask<'mesh> {
+impl MeshBitMask {
 	/// Find x coordinate of the nearest grid point on the left. Return boundary value for out-of-bounds input.
 	#[inline]
 	fn get_x(&self, x: f32) -> usize {
@@ -104,11 +111,11 @@ impl<'mesh> MeshBitMask<'mesh> {
 	/// Actually build `mask` content by testing grid points in regions spanned by each triangle.
 	// Is a method with `&mut self` so that `get_x()` `get_y()` helpers could be reused.
 	#[inline]
-	fn build(&mut self) {
+	fn build(&mut self, mesh: &Mesh) {
 		self.mask.resize(self.width * self.height, None);
 
-		for i in 0..(self.mesh.indices.len() / 3) as u16 {
-			let vertices = self.mesh.get_triangle(i);
+		for i in 0..(mesh.indices.len() / 3) as u32 {
+			let vertices = mesh.get_triangle(i);
 
 			let (region_top_left, region_bottom_right) = get_bounds(vertices.iter());
 			let x_begin = self.get_x(region_top_left.x);
@@ -120,7 +127,7 @@ impl<'mesh> MeshBitMask<'mesh> {
 				for y in y_begin..=y_end {
 					let p = self.top_left + Vec2::new(x as f32 * self.x_step, y as f32 * self.y_step);
 					if is_point_in_triangle(p, &vertices) {
-						self.mask[x + y * self.width] = Some(NonZeroU16::new(i + 1).unwrap());
+						self.mask[x + y * self.width] = Some(NonZeroU32::new(i + 1).unwrap());
 					}
 				}
 			}
@@ -131,7 +138,7 @@ impl<'mesh> MeshBitMask<'mesh> {
 	const MIN_STEP: f32 = 1.0;
 
 	/// Create a `MeshBitMask` associated to `mesh`, storing a reference to it (thus living as long as `mesh`).
-	pub fn new(mesh: &'mesh Mesh) -> Self {
+	pub fn new(mesh: &Mesh) -> Self {
 		let (top_left, bottom_right) = get_bounds(mesh.vertices.iter());
 
 		// TODO: Figure out if dynamic steps according to mesh are worthy, if so, how to properly do them.
@@ -139,7 +146,7 @@ impl<'mesh> MeshBitMask<'mesh> {
 		let mut x_step = f32::INFINITY;
 		let mut y_step = f32::INFINITY;
 		// If mesh is empty, step will keep being infinity, and this shall not cause problems anyways.
-		for i in 0..(mesh.indices.len() / 3) as u16 {
+		for i in 0..(mesh.indices.len() / 3) as u32 {
 			let [p0, p1, p2] = mesh.get_triangle(i);
 
 			x_step = x_step
@@ -176,7 +183,6 @@ impl<'mesh> MeshBitMask<'mesh> {
 		let height = ((bottom_right.y - top_left.y) / y_step).ceil() as usize;
 
 		let mut this = Self {
-			mesh,
 			top_left,
 			x_step,
 			y_step,
@@ -184,12 +190,12 @@ impl<'mesh> MeshBitMask<'mesh> {
 			height,
 			mask: Vec::new(),
 		};
-		this.build();
+		this.build(mesh);
 		this
 	}
 
 	/// Return the index of the triangle point `p` is in, if any.
-	pub fn test(&self, p: Vec2) -> Option<u16> {
+	pub fn test(&self, p: Vec2, mesh: &Mesh) -> Option<u32> {
 		// handle empty mesh case
 		if self.mask.is_empty() {
 			return None;
@@ -208,7 +214,7 @@ impl<'mesh> MeshBitMask<'mesh> {
 
 		candidates
 			.into_iter()
-			.find(|&t| is_point_in_triangle(p, &self.mesh.get_triangle(t)))
+			.find(|&t| is_point_in_triangle(p, &mesh.get_triangle(t)))
 	}
 }
 
@@ -233,7 +239,7 @@ mod tests {
 	}
 
 	/// Run the test function with mesh(es) and test points and answers, under the given affine transform.
-	fn test_with_mesh(transform: Affine2, f: impl Fn(&Mesh, Vec<Vec2>) -> Vec<Option<u16>>) {
+	fn test_with_mesh(transform: Affine2, f: impl Fn(&Mesh, Vec<Vec2>) -> Vec<Option<u32>>) {
 		let vertices = vec![
 			vec2(2.0, 0.0),
 			vec2(0.0, 8.0),
@@ -253,7 +259,7 @@ mod tests {
 			origin: Vec2::ZERO,
 		};
 
-		let points_and_ans: [(Vec2, Option<u16>); 13] = [
+		let points_and_ans: [(Vec2, Option<u32>); 13] = [
 			(vec2(-1.0, 0.0), None),
 			(vec2(5.0, 1.0), None),
 			(vec2(9.0, 6.0), None),
@@ -269,7 +275,7 @@ mod tests {
 			(vec2(8.0, 5.0), Some(3)),
 		];
 		let points: Vec<Vec2> = points_and_ans.iter().map(|p| transform.transform_point2(p.0)).collect();
-		let ans: Vec<Option<u16>> = points_and_ans.iter().map(|p| p.1).collect();
+		let ans: Vec<Option<u32>> = points_and_ans.iter().map(|p| p.1).collect();
 
 		assert_eq!(f(&mesh, points), ans);
 	}
@@ -325,7 +331,7 @@ mod tests {
 			test_with_mesh(*transform, |mesh, ps| {
 				let bit_mask = MeshBitMask::new(mesh);
 
-				ps.into_iter().map(|p| bit_mask.test(p)).collect()
+				ps.into_iter().map(|p| bit_mask.test(p, mesh)).collect()
 			})
 		})
 	}
@@ -342,7 +348,7 @@ mod tests {
 
 		assert_eq!(bit_mask.width, 0);
 		assert_eq!(bit_mask.height, 0);
-		assert_eq!(bit_mask.test(vec2(-1.0, 0.0)), None);
-		assert_eq!(bit_mask.test(vec2(1.0, 2.0)), None);
+		assert_eq!(bit_mask.test(vec2(-1.0, 0.0), &mesh), None);
+		assert_eq!(bit_mask.test(vec2(1.0, 2.0), &mesh), None);
 	}
 }

@@ -1,4 +1,9 @@
-use crate::node::components::{TransformStore, ZSort};
+use glam::Mat4;
+
+use crate::{
+	math::{deform::Deform, triangle::MeshBitMask},
+	node::components::{DeformSource, DeformStack, Mesh, MeshGroup, TransformStore, ZSort},
+};
 
 use super::{InoxNodeTree, Puppet, World};
 
@@ -51,6 +56,50 @@ impl TransformCtx {
 
 			let node_zsort = comps.get_mut::<ZSort>(node.uuid).unwrap();
 			node_zsort.0 += base.1;
+
+			// Since this is the only place I can think of to put it, let's go
+			// and look for the closest MeshGroup parent and add that to the
+			// stack.
+
+			let mut ancestor = nodes.get_parent(node.uuid).uuid;
+			let mut tf_matrix = if let Some(transform_store) = comps.get::<TransformStore>(node.uuid) {
+				transform_store.relative.to_matrix()
+			} else {
+				Mat4::IDENTITY
+			};
+
+			while ancestor != nodes.root_node_id {
+				let imposes_deform = if let Some(mg) = comps.get::<MeshGroup>(ancestor) {
+					if mg.dynamic {
+						true
+					} else {
+						// Static meshgroups do not need a deform stack item.
+						break;
+					}
+				} else {
+					// Meshes can impose a deform on their children anyway
+					comps.get::<Mesh>(ancestor).is_some()
+				};
+
+				if imposes_deform {
+					// We need to calculate a testing mask for all our parent
+					// deform meshes.
+					if comps.get::<MeshBitMask>(ancestor).is_none() {
+						comps.add(ancestor, MeshBitMask::new(comps.get::<Mesh>(ancestor).unwrap()));
+					}
+
+					if let Some(deform_stack) = comps.get_mut::<DeformStack>(node.uuid) {
+						deform_stack.push(DeformSource::MeshGroup(ancestor), Deform::Source(tf_matrix));
+						break;
+					}
+				}
+
+				if let Some(transform_store) = comps.get::<TransformStore>(ancestor) {
+					tf_matrix = transform_store.relative.to_matrix() * tf_matrix;
+				}
+
+				ancestor = nodes.get_parent(ancestor).uuid;
+			}
 		}
 	}
 }

@@ -93,6 +93,14 @@ impl InoxNodeTree {
 			.children(&self.arena)
 			.map(|id| self.arena.get(id).unwrap().get())
 	}
+	
+	pub fn get_descendents(&self, parent: InoxNodeUuid) -> impl Iterator<Item = &InoxNode> {
+		self.node_ids
+			.get(&parent)
+			.unwrap()
+			.descendants(&self.arena)
+			.map(|id| self.arena.get(id).unwrap().get())
+	}
 
 	pub fn is_node_enabled(&self, node: InoxNodeUuid) -> bool {
 		let mut node = self.get_node(node).unwrap();
