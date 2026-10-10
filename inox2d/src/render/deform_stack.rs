@@ -133,7 +133,6 @@ impl DeformStack {
 						}
 
 						if is_dynamic {
-							eprintln!("Deforming {:?} with deform from {:?}", uuid, source_node);
 							foreign_mesh_combine(
 								foreign_mesh,
 								foreign_deform,
@@ -146,8 +145,8 @@ impl DeformStack {
 
 						// Also, MeshGroups translate their children, too.
 						if translate_children {
-							eprintln!("Translating {:?} with transform from {:?}", uuid, source_node);
-							let translation_deform = if let Some(target_xform) = node_comps.get::<TransformStore>(uuid) {
+							let translation_deform = if let Some(target_xform) = node_comps.get::<TransformStore>(uuid)
+							{
 								let translation_fake_mesh = Mesh {
 									vertices: vec![target_xform.relative.translation.xy()],
 									uvs: vec![],
@@ -155,8 +154,6 @@ impl DeformStack {
 									origin: Vec2::ZERO,
 								};
 								let mut translation_deform = vec![Vec2::ZERO];
-
-								eprintln!("FROM: {:?}", target_xform.relative.translation.xy());
 
 								foreign_mesh_combine(
 									foreign_mesh,
@@ -173,8 +170,7 @@ impl DeformStack {
 							};
 
 							if let Some(target_xform) = node_comps.get_mut::<TransformStore>(uuid) {
-								eprintln!("TO: {:?}", translation_deform.xy());
-								//target_xform.relative.translation = translation_deform;
+								target_xform.relative.translation = translation_deform;
 							}
 						}
 					}

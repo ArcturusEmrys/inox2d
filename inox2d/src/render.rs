@@ -5,17 +5,19 @@ use std::collections::HashSet;
 use std::error::Error;
 use std::mem::swap;
 
+use crate::math::deform::Deform;
+use crate::math::triangle::MeshBitMask;
 use crate::node::{
-	components::{DeformStack, Drawable, Mask, Masks, Mesh, MeshGroup, MeshGroupDeform, ZSort, TransformStore, DeformSource},
+	components::{
+		DeformSource, DeformStack, Drawable, Mask, Masks, Mesh, MeshGroup, MeshGroupDeform, TransformStore, ZSort,
+	},
 	drawables::{CompositeComponents, DrawableKind, TexturedMeshComponents},
 	InoxNodeUuid,
 };
 use crate::params::BindingValues;
 use crate::puppet::{InoxNodeTree, Puppet, World};
-use crate::math::triangle::MeshBitMask;
-use crate::math::deform::Deform;
 
-use glam::{Vec2, Mat4};
+use glam::{Mat4, Vec2};
 pub use vertex_buffers::VertexBuffers;
 
 /// Additional info per node for rendering a TexturedMesh:
@@ -159,7 +161,7 @@ impl RenderCtx {
 	}
 
 	/// Combine deform stacks and update any transforms affected by them.
-	/// 
+	///
 	/// This must be called BEFORE TransformCtx.update() which freezes
 	/// transforms, as deforms can update the transforms.
 	pub(crate) fn combine_deforms(&mut self, nodes: &InoxNodeTree, world: &mut World) {
@@ -183,7 +185,7 @@ impl RenderCtx {
 					// Meshes can impose a deform on their children anyway
 					(world.get::<Mesh>(ancestor).is_some(), false)
 				};
-				
+
 				// We should only use the closest dynamic deform
 				if dynamic_deform {
 					found_dynamic = true;
@@ -197,7 +199,10 @@ impl RenderCtx {
 					}
 
 					if let Some(deform_stack) = world.get_mut::<DeformStack>(node.uuid) {
-						deform_stack.push(DeformSource::MeshGroup(ancestor), Deform::Source(tf_matrix, dynamic_deform, translate_children));
+						deform_stack.push(
+							DeformSource::MeshGroup(ancestor),
+							Deform::Source(tf_matrix, dynamic_deform, translate_children),
+						);
 						break;
 					}
 				}
@@ -211,8 +216,17 @@ impl RenderCtx {
 
 			// Ensure meshgroups have an allocated deform block
 			if world.get::<MeshGroup>(node.uuid).is_some() && world.get::<MeshGroupDeform>(node.uuid).is_none() {
-				let count = world.get::<Mesh>(node.uuid).expect("all meshgroups have a mesh").vertices.len();
-				world.add(node.uuid, MeshGroupDeform { deform: vec![Vec2::ZERO; count] });
+				let count = world
+					.get::<Mesh>(node.uuid)
+					.expect("all meshgroups have a mesh")
+					.vertices
+					.len();
+				world.add(
+					node.uuid,
+					MeshGroupDeform {
+						deform: vec![Vec2::ZERO; count],
+					},
+				);
 			}
 
 			let (stacks, mut comps) = world.as_partition().split_by_component::<DeformStack>();
@@ -244,14 +258,7 @@ impl RenderCtx {
 				let len = deform.len();
 
 				if let Some(deform_stack) = stacks.get::<DeformStack>(node.uuid) {
-					deform_stack.combine(
-						node.uuid,
-						nodes,
-						&mut comps,
-						&mut deform,
-						0,
-						len,
-					);
+					deform_stack.combine(node.uuid, nodes, &mut comps, &mut deform, 0, len);
 				}
 
 				comps
