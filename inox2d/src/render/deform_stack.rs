@@ -2,12 +2,12 @@ use std::collections::HashMap;
 use std::mem::swap;
 use std::ops::Range;
 
-use glam::Vec2;
+use glam::{Vec2, Vec3, Vec3Swizzles};
 
 use crate::math::deform::{foreign_mesh_combine, linear_combine, Deform};
 use crate::math::triangle::MeshBitMask;
-use crate::node::components::{DeformSource, DeformStack, Mesh, MeshGroupDeform};
-use crate::puppet::{InoxNodeTree, Query, World};
+use crate::node::components::{DeformSource, DeformStack, Mesh, MeshGroupDeform, TransformStore};
+use crate::puppet::{InoxNodeTree, Query};
 use crate::render::{InoxNodeUuid, TexturedMeshRenderCtx};
 
 fn split_ranges<'a, T>(
@@ -57,7 +57,7 @@ impl DeformStack {
 		&self,
 		uuid: InoxNodeUuid,
 		_nodes: &InoxNodeTree,
-		node_comps: &impl Query,
+		node_comps: &mut impl Query,
 		result: &mut [Vec2],
 		vert_offset: usize,
 		vert_len: usize,
@@ -79,7 +79,7 @@ impl DeformStack {
 					Deform::Direct(ref direct_deform) => {
 						linear_combine(direct_deform, &mut result[vert_offset..(vert_offset + vert_len)]);
 					}
-					Deform::Source(reverse_matrix) => {
+					Deform::Source(reverse_matrix, is_dynamic, translate_children) => {
 						let DeformSource::MeshGroup(source_node) = src else {
 							panic!("Source deform application through params is not supported (or meaningful)");
 						};
@@ -121,7 +121,7 @@ impl DeformStack {
 									&mesh_deform_buffer.deform[..],
 								))
 							} else {
-								None
+								panic!("Node {:?} is missing a valid location to store deforms.", source_node);
 							})
 						else {
 							continue;
@@ -132,14 +132,51 @@ impl DeformStack {
 							continue;
 						}
 
-						foreign_mesh_combine(
-							foreign_mesh,
-							foreign_deform,
-							node_comps.get::<MeshBitMask>(*source_node).unwrap(),
-							result_mesh,
-							reverse_matrix,
-							my_deform,
-						);
+						if is_dynamic {
+							eprintln!("Deforming {:?} with deform from {:?}", uuid, source_node);
+							foreign_mesh_combine(
+								foreign_mesh,
+								foreign_deform,
+								node_comps.get::<MeshBitMask>(*source_node).unwrap(),
+								result_mesh,
+								reverse_matrix,
+								my_deform,
+							);
+						}
+
+						// Also, MeshGroups translate their children, too.
+						if translate_children {
+							eprintln!("Translating {:?} with transform from {:?}", uuid, source_node);
+							let translation_deform = if let Some(target_xform) = node_comps.get::<TransformStore>(uuid) {
+								let translation_fake_mesh = Mesh {
+									vertices: vec![target_xform.relative.translation.xy()],
+									uvs: vec![],
+									indices: vec![],
+									origin: Vec2::ZERO,
+								};
+								let mut translation_deform = vec![Vec2::ZERO];
+
+								eprintln!("FROM: {:?}", target_xform.relative.translation.xy());
+
+								foreign_mesh_combine(
+									foreign_mesh,
+									foreign_deform,
+									node_comps.get::<MeshBitMask>(*source_node).unwrap(),
+									&translation_fake_mesh,
+									reverse_matrix,
+									&mut translation_deform,
+								);
+
+								target_xform.relative.translation - Vec3::from((translation_deform[0], 0.0))
+							} else {
+								Vec3::ZERO
+							};
+
+							if let Some(target_xform) = node_comps.get_mut::<TransformStore>(uuid) {
+								eprintln!("TO: {:?}", translation_deform.xy());
+								//target_xform.relative.translation = translation_deform;
+							}
+						}
 					}
 				}
 			}
@@ -166,10 +203,15 @@ impl DeformStack {
 					})
 					.or_insert((true, deform));
 			}
-			Deform::Source(_reverse_matrix) => {
+			Deform::Source(_reverse_matrix, is_dynamic, translate_children) => {
 				let DeformSource::MeshGroup(_source_node) = src else {
 					panic!("Source deform application through params is not supported (or meaningful)");
 				};
+
+				if !is_dynamic && !translate_children {
+					//If both options are disabled, the deform does nothing so don't process it.
+					return;
+				}
 
 				self.stack
 					.entry(src)

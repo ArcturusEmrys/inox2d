@@ -132,6 +132,10 @@ impl Puppet {
 			param_ctx.apply(&self.params, &self.nodes, &mut self.node_comps);
 		}
 
+		if let Some(render_ctx) = self.render_ctx.as_mut() {
+			render_ctx.combine_deforms(&self.nodes, &mut self.node_comps);
+		}
+
 		if let Some(transform_ctx) = self.transform_ctx.as_mut() {
 			transform_ctx.update(&self.nodes, &mut self.node_comps);
 		}
@@ -163,6 +167,10 @@ impl Puppet {
 			}
 			param_ctx.apply(&self.params, &self.nodes, &mut self.node_comps);
 
+			if let Some(render_ctx) = self.render_ctx.as_mut() {
+				render_ctx.combine_deforms(&self.nodes, &mut self.node_comps);
+			}
+
 			transform_ctx.update(&self.nodes, &mut self.node_comps);
 		}
 
@@ -186,7 +194,7 @@ impl Puppet {
 	pub fn params(&self) -> &HashMap<String, Param> {
 		&self.params
 	}
-	
+
 	/// Compute the bounds of the puppet's current state.
 	pub fn bounds(&self) -> Option<RectBounds> {
 		let mut out = None;

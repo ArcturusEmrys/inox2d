@@ -12,7 +12,16 @@ pub(crate) enum Deform {
 	///
 	/// The Mat4 specifies the transform from this node's coordinates to the
 	/// source mesh specifying the deformation.
-	Source(Mat4),
+	/// 
+	/// The first boolean indicates if the deform is dynamic. Only dynamic
+	/// deforms are actually applied to their children; static deforms are
+	/// precalculated.
+	/// 
+	/// NOTE: The Static behavior goes away in Inochi2D 0.9.
+	/// 
+	/// The second boolean indicates if the deform also changes the translate
+	/// coordinates of the object.
+	Source(Mat4, bool, bool),
 }
 
 /// Element-wise add a single direct deform up and write result.

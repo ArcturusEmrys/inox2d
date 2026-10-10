@@ -6,14 +6,16 @@ use std::error::Error;
 use std::mem::swap;
 
 use crate::node::{
-	components::{DeformStack, Drawable, Mask, Masks, Mesh, MeshGroup, MeshGroupDeform, ZSort},
+	components::{DeformStack, Drawable, Mask, Masks, Mesh, MeshGroup, MeshGroupDeform, ZSort, TransformStore, DeformSource},
 	drawables::{CompositeComponents, DrawableKind, TexturedMeshComponents},
 	InoxNodeUuid,
 };
 use crate::params::BindingValues;
 use crate::puppet::{InoxNodeTree, Puppet, World};
+use crate::math::triangle::MeshBitMask;
+use crate::math::deform::Deform;
 
-use glam::Vec2;
+use glam::{Vec2, Mat4};
 pub use vertex_buffers::VertexBuffers;
 
 /// Additional info per node for rendering a TexturedMesh:
@@ -156,7 +158,111 @@ impl RenderCtx {
 		}
 	}
 
-	/// Update zsort-ordered info and deform buffer content inside self, according to updated puppet.
+	/// Combine deform stacks and update any transforms affected by them.
+	/// 
+	/// This must be called BEFORE TransformCtx.update() which freezes
+	/// transforms, as deforms can update the transforms.
+	pub(crate) fn combine_deforms(&mut self, nodes: &InoxNodeTree, world: &mut World) {
+		// Root does not have a deform.
+		for node in nodes.iter().skip(1) {
+			// First, check if our node has a parent mesh that can impose a
+			// deform, and if so, add it to the stack.
+			let mut ancestor = nodes.get_parent(node.uuid).uuid;
+			let mut tf_matrix = if let Some(transform_store) = world.get::<TransformStore>(node.uuid) {
+				transform_store.relative.to_matrix()
+			} else {
+				Mat4::IDENTITY
+			};
+
+			let mut found_dynamic = false;
+
+			while ancestor != nodes.root_node_id {
+				let (dynamic_deform, translate_children) = if let Some(mg) = world.get::<MeshGroup>(ancestor) {
+					(mg.dynamic && !found_dynamic, mg.translate_children) // TODO: mg.translate_children gets stored as FALSE for nodes that had it TRUE on the INX
+				} else {
+					// Meshes can impose a deform on their children anyway
+					(world.get::<Mesh>(ancestor).is_some(), false)
+				};
+				
+				// We should only use the closest dynamic deform
+				if dynamic_deform {
+					found_dynamic = true;
+				}
+
+				if dynamic_deform || translate_children {
+					// We need to calculate a testing mask for all our parent
+					// deform meshes.
+					if world.get::<MeshBitMask>(ancestor).is_none() {
+						world.add(ancestor, MeshBitMask::new(world.get::<Mesh>(ancestor).unwrap()));
+					}
+
+					if let Some(deform_stack) = world.get_mut::<DeformStack>(node.uuid) {
+						deform_stack.push(DeformSource::MeshGroup(ancestor), Deform::Source(tf_matrix, dynamic_deform, translate_children));
+						break;
+					}
+				}
+
+				if let Some(transform_store) = world.get::<TransformStore>(ancestor) {
+					tf_matrix = transform_store.relative.to_matrix() * tf_matrix;
+				}
+
+				ancestor = nodes.get_parent(ancestor).uuid;
+			}
+
+			// Ensure meshgroups have an allocated deform block
+			if world.get::<MeshGroup>(node.uuid).is_some() && world.get::<MeshGroupDeform>(node.uuid).is_none() {
+				let count = world.get::<Mesh>(node.uuid).expect("all meshgroups have a mesh").vertices.len();
+				world.add(node.uuid, MeshGroupDeform { deform: vec![Vec2::ZERO; count] });
+			}
+
+			let (stacks, mut comps) = world.as_partition().split_by_component::<DeformStack>();
+
+			if let Some(render_ctx) = comps.get::<TexturedMeshRenderCtx>(node.uuid) {
+				let vert_offset = render_ctx.vert_offset as usize;
+				let vert_len = render_ctx.vert_len;
+
+				if let Some(deform_stack) = stacks.get::<DeformStack>(node.uuid) {
+					deform_stack.combine(
+						node.uuid,
+						nodes,
+						&mut comps,
+						&mut self.vertex_buffers.deforms,
+						vert_offset,
+						vert_len,
+					);
+				}
+			} else if comps.get::<MeshGroupDeform>(node.uuid).is_some() {
+				//Meshgroups aren't drawable, but we still need to deform them
+				//so child nodes can reference their deformations.
+				let mut deform = vec![Vec2::ZERO; 0];
+				if let Some(prealloc) = comps.get_mut::<MeshGroupDeform>(node.uuid) {
+					swap(&mut deform, &mut prealloc.deform);
+				} else {
+					unreachable!();
+				}
+
+				let len = deform.len();
+
+				if let Some(deform_stack) = stacks.get::<DeformStack>(node.uuid) {
+					deform_stack.combine(
+						node.uuid,
+						nodes,
+						&mut comps,
+						&mut deform,
+						0,
+						len,
+					);
+				}
+
+				comps
+					.get_mut::<MeshGroupDeform>(node.uuid)
+					.expect("valid deform scratch buffer")
+					.deform = deform;
+			};
+		}
+	}
+
+	/// Update zsort-ordered info inside self, according to updated puppet.
 	pub(crate) fn update(&mut self, nodes: &InoxNodeTree, comps: &mut World) {
 		let mut root_drawable_uuid_zsort_vec = Vec::<(InoxNodeUuid, f32)>::new();
 
@@ -212,48 +318,9 @@ impl RenderCtx {
 								.zsorted_children_list,
 						);
 					}
-					// for TexturedMesh, obtain and write deforms into vertex_buffer
-					DrawableKind::TexturedMesh(..) => {
-						// A TexturedMesh not having an associated DeformStack means it will not be deformed at all, skip.
-						if let Some(deform_stack) = comps.get::<DeformStack>(node.uuid) {
-							let render_ctx = comps.get::<TexturedMeshRenderCtx>(node.uuid).unwrap();
-							let vert_offset = render_ctx.vert_offset as usize;
-							let vert_len = render_ctx.vert_len;
-
-							deform_stack.combine(
-								node.uuid,
-								nodes,
-								comps,
-								&mut self.vertex_buffers.deforms,
-								vert_offset,
-								vert_len,
-							);
-						}
-					}
-				}
-			} else if let Some(_mg) = comps.get::<MeshGroup>(node.uuid) {
-				//Meshgroups aren't drawable, but we still need to deform them
-				//so child nodes can reference their deformations.
-				let mut deform = vec![Vec2::ZERO; 0];
-				if let Some(prealloc) = comps.get_mut::<MeshGroupDeform>(node.uuid) {
-					swap(&mut deform, &mut prealloc.deform);
-				} else {
-					let mesh = comps.get::<Mesh>(node.uuid).expect("all meshgroups have a mesh");
-					deform = vec![Vec2::ZERO; mesh.vertices.len()];
-				}
-
-				if let Some(deform_stack) = comps.get::<DeformStack>(node.uuid) {
-					let len = deform.len();
-					deform_stack.combine(node.uuid, nodes, comps, &mut deform, 0, len);
-				}
-
-				if comps.get::<MeshGroupDeform>(node.uuid).is_none() {
-					comps.add(node.uuid, MeshGroupDeform { deform: deform });
-				} else {
-					comps
-						.get_mut::<MeshGroupDeform>(node.uuid)
-						.expect("valid deform scratch buffer")
-						.deform = deform;
+					// Nothing to do here - we should have already combined our
+					// deforms by now.
+					DrawableKind::TexturedMesh(..) => {}
 				}
 			}
 		}
