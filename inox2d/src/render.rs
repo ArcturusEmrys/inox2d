@@ -94,11 +94,11 @@ impl RenderCtx {
 						}
 					}
 					DrawableKind::Composite { .. } => {
-						// exclude non-drawable children
+						// exclude non-drawable transitive children
 						let children_list: Vec<InoxNodeUuid> = nodes
-							.get_children(node.uuid)
+							.get_descendents(node.uuid)
 							.filter_map(|n| {
-								if DrawableKind::new(n.uuid, comps, false).is_some() {
+								if n.uuid != node.uuid && DrawableKind::new(n.uuid, comps, false).is_some() {
 									Some(n.uuid)
 								} else {
 									None
@@ -166,11 +166,20 @@ impl RenderCtx {
 				let parent = nodes.get_parent(node.uuid);
 				let node_zsort = comps.get::<ZSort>(node.uuid).unwrap().0;
 
-				if !matches!(
-					DrawableKind::new(parent.uuid, comps, false),
-					Some(DrawableKind::Composite(_))
-				) {
-					// exclude composite children
+				// Exclude composite children transitively.
+				let mut ancestor = parent;
+				while ancestor.uuid != nodes.root_node_id {
+					if matches!(
+						DrawableKind::new(ancestor.uuid, comps, false),
+						Some(DrawableKind::Composite(_))
+					) {
+						break;
+					}
+
+					ancestor = nodes.get_parent(ancestor.uuid);
+				}
+
+				if ancestor.uuid == nodes.root_node_id {
 					root_drawable_uuid_zsort_vec.push((node.uuid, node_zsort));
 				}
 
@@ -425,7 +434,20 @@ impl<'a, T: DrawSession<'a>> DrawSessionExt for T {
 				.expect("All children in zsorted_children_list should be a Drawable.");
 			match drawable_kind {
 				DrawableKind::TexturedMesh(components) => {
-					self.draw_textured_mesh_content(as_mask, &components, comps.get(*uuid).unwrap(), *uuid)
+					// Check for masks that reference composites, and reject
+					// them now.
+					if let Some(masks) = &components.drawable.masks {
+						for mask in masks.masks.iter() {
+							match DrawableKind::new(mask.source, comps, false) {
+								Some(DrawableKind::Composite(_)) => {
+									panic!("Composite mask source inside composite not allowed.")
+								}
+								_ => {}
+							}
+						}
+					}
+
+					self.draw_drawable(puppet, as_mask, comps, *uuid)
 				}
 				DrawableKind::Composite { .. } => panic!("Composite inside Composite not allowed."),
 			}
